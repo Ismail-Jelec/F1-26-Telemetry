@@ -458,11 +458,15 @@ public sealed class TrackLimitsView(TelemetryHub hub, TrackLimitsSettings s) : O
         if (warnings > _seenWarnings && _seenWarnings >= 0) _flashAt = Now;
         _seenWarnings = warnings;
 
-        int limit = Math.Clamp(s.WarningLimit, 1, 10);
+        // Penalties come every `step` warnings: 3/3 -> shown as 3/6, 6/6 -> 6/9 and so on.
+        int step = Math.Clamp(s.WarningLimit, 1, 10);
+        int next = (warnings / step + 1) * step;   // warning count of the next penalty
+        int inBlock = warnings - (next - step);    // progress towards the next penalty
+        int reached = warnings / step;             // penalties earned from warnings so far
         var (stateHex, stateText) =
             warnings == 0 ? (s.OkColor, "CLEAN") :
-            warnings >= limit ? (s.DangerColor, "LIMIT REACHED") :
-            warnings == limit - 1 ? (s.DangerColor, "LAST WARNING") :
+            inBlock == step - 1 ? (s.DangerColor, "LAST WARNING") :
+            inBlock == 0 ? (s.DangerColor, reached == 1 ? "PENALTY" : $"PENALTY x{reached}") :
             (s.WarnColor, "WARNING");
 
         var size = ContentSize;
@@ -493,20 +497,20 @@ public sealed class TrackLimitsView(TelemetryHub hub, TrackLimitsSettings s) : O
         double mainTop = y;
         double numY = mainTop + (s.ShowPips ? MainH * 0.45 : MainH / 2);
         var num = DrawText(dc, warnings.ToString(CultureInfo.InvariantCulture), 40 * fs, state, 12, numY, heavy: true);
-        DrawText(dc, $"/ {limit}", 16 * fs, muted, num.Right + 6, numY + 6 * fs, heavy: true);
+        DrawText(dc, $"/ {next}", 16 * fs, muted, num.Right + 6, numY + 6 * fs, heavy: true);
 
         DrawText(dc, stateText, 11 * fs, state, w - 12, numY - 8 * fs, TextAlignment.Right, heavy: true);
-        DrawText(dc, "warnings", 11 * fs, muted, w - 12, numY + 9 * fs, TextAlignment.Right);
+        DrawText(dc, $"{next - warnings} to next penalty", 11 * fs, muted, w - 12, numY + 9 * fs, TextAlignment.Right);
 
         if (s.ShowPips)
         {
             double pipY = mainTop + MainH * 0.84;
             double gap = 5 * fs;
-            double pipW = Math.Min(28 * fs, (w - 24 - gap * (limit - 1)) / limit);
-            for (int i = 0; i < limit; i++)
+            double pipW = Math.Min(28 * fs, (w - 24 - gap * (step - 1)) / step);
+            for (int i = 0; i < step; i++)
             {
                 var r = new Rect(12 + i * (pipW + gap), pipY - 3 * fs, pipW, 6 * fs);
-                dc.DrawRoundedRectangle(i < warnings ? state : Theme.Brush("#FFFFFF", 0.12), null, r, 3 * fs, 3 * fs);
+                dc.DrawRoundedRectangle(i < inBlock ? state : Theme.Brush("#FFFFFF", 0.12), null, r, 3 * fs, 3 * fs);
             }
         }
         y += MainH;

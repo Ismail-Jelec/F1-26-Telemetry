@@ -514,13 +514,13 @@ public sealed class ControlWindow : Window
             ]),
             ("Content", () =>
             [
-                Card("Warning limit", "How many corner-cutting warnings you get before a penalty. Match it to your lobby's settings.",
-                    RowStacked("Warnings before penalty", MakeSlider(1, 10, 1, s.WarningLimit, v => $"{v:0}", v => { s.WarningLimit = (int)v; C(); }))),
+                Card("Warnings per penalty", "A penalty every N warnings. With 3, the counter shows 2/3, then 3/6 after the first penalty, then 6/9, and so on.",
+                    RowStacked("Warnings per penalty", MakeSlider(1, 10, 1, s.WarningLimit, v => $"{v:0}", v => { s.WarningLimit = (int)v; C(); }))),
                 Card("Sections", null,
                     RowInline("Accent stripe", null, Switch(s.ShowAccentStripe, on => { s.ShowAccentStripe = on; C(); })),
                     RowInline("Title bar", null, Switch(s.ShowTitle, on => { s.ShowTitle = on; C(); })),
                     RowInline("Title text", null, TextInput(s.TitleText, t => { s.TitleText = t; C(); })),
-                    RowInline("Warning pips", "One bar per warning up to your limit", Switch(s.ShowPips, on => { s.ShowPips = on; C(); }))),
+                    RowInline("Warning pips", "Progress towards the next penalty", Switch(s.ShowPips, on => { s.ShowPips = on; C(); }))),
                 Card("Stats", null,
                     RowInline("Invalid laps", "Laps invalidated this session, including the current one", Switch(s.ShowInvalidLaps, on => { s.ShowInvalidLaps = on; C(); })),
                     RowInline("Total warnings", "All warnings, not only track limits", Switch(s.ShowTotalWarnings, on => { s.ShowTotalWarnings = on; C(); })),
