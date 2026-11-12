@@ -200,7 +200,7 @@ public sealed class ColorSwatches : WrapPanel
         Select(selected);
     }
 
-    private void Select(string hex)
+    public void Select(string hex)
     {
         foreach (var (h, el) in _items)
             el.BorderThickness = new Thickness(string.Equals(h, hex, StringComparison.OrdinalIgnoreCase) ? 2.5 : 0);
@@ -292,5 +292,171 @@ public sealed class NavItem : Border
         Anim.To(_barScale, ScaleTransform.ScaleYProperty, selected ? 1 : 0, 250, new BackEase { Amplitude = 0.5, EasingMode = EasingMode.EaseOut });
         Anim.ColorTo(_bg, selected ? Theme.Card : Colors.Transparent, 200);
         _title.Foreground = Theme.B(selected ? Theme.TextColor : Theme.Muted);
+    }
+}
+
+/// <summary>Segmented control with a sliding highlight, used for sub-tabs.</summary>
+public sealed class SegmentedTabs : Border
+{
+    private readonly Grid _grid = new();
+    private readonly Border _highlight;
+    private readonly TranslateTransform _move = new();
+    private readonly List<TextBlock> _labels = [];
+    private int _index;
+
+    public event Action<int>? Selected;
+
+    public SegmentedTabs(string[] items, int selected = 0)
+    {
+        _index = selected;
+        Background = Theme.B(Theme.Sidebar);
+        CornerRadius = new CornerRadius(11);
+        Padding = new Thickness(4);
+        Height = 42;
+        Child = _grid;
+
+        foreach (var _ in items) _grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        _highlight = new Border
+        {
+            CornerRadius = new CornerRadius(8), Background = Theme.B(Theme.CardHover),
+            BorderBrush = Theme.B(Theme.Line), BorderThickness = new Thickness(1),
+            HorizontalAlignment = HorizontalAlignment.Left, RenderTransform = _move,
+        };
+        Grid.SetColumnSpan(_highlight, items.Length);
+        _grid.Children.Add(_highlight);
+
+        for (int i = 0; i < items.Length; i++)
+        {
+            int index = i;
+            var label = new TextBlock
+            {
+                Text = items[i], FontFamily = Theme.Font, FontSize = 13, FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                Foreground = Theme.B(i == selected ? Theme.TextColor : Theme.Muted),
+            };
+            var hit = new Border { Background = Brushes.Transparent, Cursor = Cursors.Hand, Child = label };
+            hit.MouseLeftButtonUp += (_, _) => Select(index, raise: true);
+            Grid.SetColumn(hit, i);
+            _grid.Children.Add(hit);
+            _labels.Add(label);
+        }
+
+        _grid.SizeChanged += (_, _) =>
+        {
+            double segment = _grid.ActualWidth / _labels.Count;
+            _highlight.Width = segment;
+            _move.BeginAnimation(TranslateTransform.XProperty, null);
+            _move.X = segment * _index;
+        };
+    }
+
+    public void Select(int index, bool raise)
+    {
+        _index = index;
+        double segment = _grid.ActualWidth / Math.Max(1, _labels.Count);
+        Anim.To(_move, TranslateTransform.XProperty, segment * index, 260, new BackEase { Amplitude = 0.25, EasingMode = EasingMode.EaseOut });
+        for (int i = 0; i < _labels.Count; i++) _labels[i].Foreground = Theme.B(i == index ? Theme.TextColor : Theme.Muted);
+        if (raise) Selected?.Invoke(index);
+    }
+}
+
+/// <summary>A row of selectable pills (single choice).</summary>
+public sealed class ChoiceChips : WrapPanel
+{
+    private readonly List<(string Value, SolidColorBrush Bg)> _chips = [];
+    public event Action<string>? Changed;
+
+    public ChoiceChips(IEnumerable<(string Value, string Label)> options, string selected, bool previewFont = false)
+    {
+        foreach (var (value, label) in options)
+        {
+            var bg = new SolidColorBrush(value == selected ? Theme.Accent : Theme.CardHover);
+            var chip = new Border
+            {
+                CornerRadius = new CornerRadius(16), Background = bg, Padding = new Thickness(14, 6, 14, 6),
+                Margin = new Thickness(0, 0, 8, 8), Cursor = Cursors.Hand,
+                Child = new TextBlock
+                {
+                    Text = label, Foreground = Brushes.White, FontSize = 13, FontWeight = FontWeights.SemiBold,
+                    FontFamily = previewFont ? new FontFamily(value + ", Segoe UI") : Theme.Font,
+                },
+            };
+            chip.MouseLeftButtonUp += (_, _) => { Select(value); Changed?.Invoke(value); };
+            _chips.Add((value, bg));
+            Children.Add(chip);
+        }
+    }
+
+    private void Select(string value)
+    {
+        foreach (var (v, bg) in _chips) Anim.ColorTo(bg, v == value ? Theme.Accent : Theme.CardHover, 180);
+    }
+}
+
+/// <summary>Swatches plus a hex box for any custom colour.</summary>
+public sealed class ColorField : StackPanel
+{
+    public event Action<string>? ColorChanged;
+
+    public ColorField(string selected)
+    {
+        var swatches = new ColorSwatches(selected);
+        Children.Add(swatches);
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
+        var preview = new Border
+        {
+            Width = 28, Height = 28, CornerRadius = new CornerRadius(7), BorderBrush = Theme.B(Theme.Line), BorderThickness = new Thickness(1),
+            Background = Theme.B(Theme.Parse(selected, Colors.White)),
+        };
+        var box = Ui.TextField(selected.ToUpperInvariant(), 100);
+        box.FontFamily = new FontFamily("Cascadia Mono, Consolas");
+        box.Margin = new Thickness(8, 0, 0, 0);
+        row.Children.Add(preview);
+        row.Children.Add(box);
+        row.Children.Add(new TextBlock { Text = "custom hex", Foreground = Theme.B(Theme.Muted), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) });
+        Children.Add(row);
+
+        bool fromSwatch = false;
+        swatches.ColorChanged += hex =>
+        {
+            fromSwatch = true;
+            box.Text = hex.ToUpperInvariant();
+            fromSwatch = false;
+            preview.Background = Theme.B(Theme.Parse(hex, Colors.White));
+            ColorChanged?.Invoke(hex);
+        };
+        box.TextChanged += (_, _) =>
+        {
+            if (fromSwatch) return;
+            var text = box.Text.Trim();
+            if (!text.StartsWith('#')) text = "#" + text;
+            if (text.Length != 7 && text.Length != 9) return;
+            try
+            {
+                var c = Theme.C(text);
+                preview.Background = Theme.B(c);
+                swatches.Select(text);
+                ColorChanged?.Invoke(text.ToUpperInvariant());
+            }
+            catch { /* not a colour yet */ }
+        };
+    }
+}
+
+/// <summary>Small factory helpers for consistently styled inputs.</summary>
+public static class Ui
+{
+    public static TextBox TextField(string text, double width)
+    {
+        return new TextBox
+        {
+            Text = text, Width = width, Height = 30, Padding = new Thickness(8, 4, 8, 4),
+            Background = Theme.B(Theme.Sidebar), Foreground = Theme.B(Theme.TextColor),
+            BorderBrush = Theme.B(Theme.Line), BorderThickness = new Thickness(1),
+            CaretBrush = Brushes.White, SelectionBrush = Theme.B(Theme.Accent),
+            FontSize = 13, VerticalContentAlignment = VerticalAlignment.Center,
+        };
     }
 }

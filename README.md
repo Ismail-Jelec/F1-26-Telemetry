@@ -18,9 +18,14 @@ dotnet run
 
 Or open `F1-26-Telemetry.slnx` in Visual Studio, set **F126Overlay** as the startup project and press ▶.
 
-The control panel (Overlay Studio) has three tabs:
-- **Lap time log** and **Inputs**: show or hide each overlay, and set its size, opacity, background opacity, colours and content (number of lap rows, which columns show, trace length, speed, pedal bars). Changes apply live.
-- **General**: lock or unlock the overlays (when unlocked you can drag them; they show a dashed outline), save laps to CSV, run demo data, and reset everything.
+The control panel (Overlay Studio) has four pages:
+- **Lap time log** and **Inputs**: a live preview, a "Show in game" switch, and four sub-tabs:
+  - **Layout:** size, width/height, row height, text size, corner radius, opacity, font, position
+  - **Content:** turn individual parts on or off (title, PB/SB rows, columns, gear, speed, trace, bars...)
+  - **Colours:** each element separately, from presets or any hex colour
+  - **Effects:** new-lap slide and flash, glow on improvement, smooth pedal bars
+- **Themes**: one-click looks (Classic F1, Midnight, Neon, Stealth, Papaya, Racing Green)
+- **General**: lock overlays, lap CSV logging, demo data, reset
 
 Positions and settings are saved in `%AppData%\F126Overlay\settings.json`. Lap CSVs go to `Documents\F126Telemetry\laps`.
 

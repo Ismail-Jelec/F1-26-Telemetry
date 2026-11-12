@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -12,9 +11,15 @@ using F126Telemetry;
 
 namespace F126Overlay;
 
-/// <summary>The customisation panel: sidebar navigation, live-applied settings, animated controls.</summary>
+/// <summary>The customisation panel: sidebar navigation, live preview, sub-tabs and live-applied settings.</summary>
 public sealed class ControlWindow : Window
 {
+    private static readonly (string Value, string Label)[] FontChoices =
+    [
+        ("Segoe UI", "Segoe UI"), ("Bahnschrift", "Bahnschrift"), ("Arial", "Arial"),
+        ("Verdana", "Verdana"), ("Trebuchet MS", "Trebuchet"), ("Consolas", "Consolas"),
+    ];
+
     private readonly TelemetryHub _hub;
     private readonly Settings _settings;
     private readonly int _port;
@@ -27,9 +32,13 @@ public sealed class ControlWindow : Window
     private readonly Border _root;
     private readonly ScaleTransform _rootScale = new(0.96, 0.96);
     private readonly Grid _pageHost = new();
+    private readonly ScrollViewer _scroll;
     private readonly TextBlock _pageTitle = new();
     private readonly TextBlock _pageSubtitle = new();
     private readonly List<(NavItem Item, Func<UIElement> Build, string Title, string Subtitle)> _pages = [];
+    private int _currentPage;
+    private readonly Dictionary<string, int> _subTab = new() { ["laplog"] = 0, ["inputs"] = 0 };
+    private readonly List<OverlayView> _previews = [];
 
     private readonly Ellipse _liveDot = new() { Width = 8, Height = 8 };
     private readonly SolidColorBrush _liveDotBrush = new(Theme.Muted);
@@ -37,7 +46,12 @@ public sealed class ControlWindow : Window
     private readonly TextBlock _packetsText = new();
     private bool? _wasLive;
 
+    private readonly Border _toast;
+    private readonly TextBlock _toastText = new();
+    private readonly TranslateTransform _toastMove = new(0, 20);
+
     private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
+    private StackPanel _navPanel = null!;
     private bool _demoRunning;
     private bool _closing;
 
@@ -49,8 +63,8 @@ public sealed class ControlWindow : Window
         _ct = ct;
         _startupError = startupError;
 
-        Title = "F1 26 Overlays";
-        Width = 820; Height = 700;
+        Title = "F1 26 Overlay Studio";
+        Width = 920; Height = 760;
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
         Background = Brushes.Transparent;
@@ -82,18 +96,37 @@ public sealed class ControlWindow : Window
         };
         Content = _root;
 
+        var overlayGrid = new Grid();
+        _root.Child = overlayGrid;
+
         var layout = new Grid();
         layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
         layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        _root.Child = layout;
+        overlayGrid.Children.Add(layout);
 
         layout.Children.Add(BuildSidebar());
-        var main = BuildMain();
+        var main = BuildMain(out _scroll);
         Grid.SetColumn(main, 1);
         layout.Children.Add(main);
 
+        // Toast
+        _toastText.Foreground = Brushes.White;
+        _toastText.FontSize = 13;
+        _toastText.FontWeight = FontWeights.SemiBold;
+        _toast = new Border
+        {
+            Background = Theme.B(Theme.CardHover), BorderBrush = Theme.B(Theme.Line), BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10), Padding = new Thickness(16, 10, 16, 10),
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(220, 0, 0, 22), Child = _toastText, Opacity = 0, IsHitTestVisible = false,
+            RenderTransform = _toastMove,
+            Effect = new DropShadowEffect { BlurRadius = 16, ShadowDepth = 2, Opacity = 0.5 },
+        };
+        overlayGrid.Children.Add(_toast);
+
         _pages.Add((null!, BuildLapLogPage, "Lap time log", "Personal best, session best and your latest laps"));
         _pages.Add((null!, BuildInputsPage, "Inputs", "Gear, speed and a live throttle / brake trace"));
+        _pages.Add((null!, BuildThemesPage, "Themes", "One-click looks for both overlays"));
         _pages.Add((null!, BuildGeneralPage, "General", "Locking, lap logging, demo data and reset"));
         BuildNav();
 
@@ -141,10 +174,7 @@ public sealed class ControlWindow : Window
         dock.Children.Add(brand);
 
         // Status pill at the bottom
-        var status = new Border
-        {
-            CornerRadius = new CornerRadius(12), Background = Theme.B(Theme.Card), Padding = new Thickness(12, 10, 12, 10),
-        };
+        var status = new Border { CornerRadius = new CornerRadius(12), Background = Theme.B(Theme.Card), Padding = new Thickness(12, 10, 12, 10) };
         var sp = new StackPanel();
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         _liveDot.Fill = _liveDotBrush;
@@ -154,6 +184,7 @@ public sealed class ControlWindow : Window
         _liveText.FontWeight = FontWeights.SemiBold;
         _liveText.FontSize = 13;
         _liveText.Foreground = Theme.B(Theme.TextColor);
+        _liveText.TextWrapping = TextWrapping.Wrap;
         row.Children.Add(_liveText);
         sp.Children.Add(row);
         _packetsText.FontSize = 11;
@@ -169,11 +200,9 @@ public sealed class ControlWindow : Window
         return side;
     }
 
-    private StackPanel _navPanel = null!;
-
     private void BuildNav()
     {
-        string[] icons = ["", "", ""];
+        string[] icons = ["", "", "", ""];
         for (int i = 0; i < _pages.Count; i++)
         {
             int index = i;
@@ -184,15 +213,15 @@ public sealed class ControlWindow : Window
         }
     }
 
-    private UIElement BuildMain()
+    private UIElement BuildMain(out ScrollViewer scroll)
     {
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(84) });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-        // Top bar: page title + window buttons (drag handle)
+        // Top bar: page title + window buttons. The empty area drags the window.
         var top = new Grid { Background = Brushes.Transparent, Margin = new Thickness(28, 0, 14, 0) };
-        top.MouseLeftButtonDown += (_, e) => { if (e.ButtonState == MouseButtonState.Pressed) DragMove(); };
+        top.MouseLeftButtonDown += (_, e) => { if (e.ButtonState == MouseButtonState.Pressed && !e.Handled) DragMove(); };
         var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 6, 0, 0) };
         _pageTitle.FontSize = 24; _pageTitle.FontWeight = FontWeights.Bold; _pageTitle.Foreground = Theme.B(Theme.TextColor);
         _pageSubtitle.FontSize = 13; _pageSubtitle.Foreground = Theme.B(Theme.Muted);
@@ -206,7 +235,7 @@ public sealed class ControlWindow : Window
         top.Children.Add(buttons);
         grid.Children.Add(top);
 
-        var scroll = new ScrollViewer
+        scroll = new ScrollViewer
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
             Padding = new Thickness(28, 4, 28, 24),
@@ -232,84 +261,289 @@ public sealed class ControlWindow : Window
         };
         b.MouseEnter += (_, _) => Anim.ColorTo(bg, hover, 120);
         b.MouseLeave += (_, _) => Anim.ColorTo(bg, Colors.Transparent, 180);
-        b.MouseLeftButtonUp += (_, _) => click();
+        // Mark the press as handled so the title bar doesn't start a window drag and eat the click.
+        b.MouseLeftButtonDown += (_, e) => e.Handled = true;
+        b.MouseLeftButtonUp += (_, e) => { e.Handled = true; click(); };
         return b;
     }
 
-    private void SelectPage(int index)
+    private void SelectPage(int index, bool animateTitle = true)
     {
+        _currentPage = index;
         for (int i = 0; i < _pages.Count; i++) _pages[i].Item.SetSelected(i == index);
         var page = _pages[index];
         _pageTitle.Text = page.Title;
         _pageSubtitle.Text = page.Subtitle;
-        Anim.EnterUp(_pageTitle, 0, 8);
-        Anim.EnterUp(_pageSubtitle, 40, 8);
+        if (animateTitle)
+        {
+            Anim.EnterUp(_pageTitle, 0, 8);
+            Anim.EnterUp(_pageSubtitle, 40, 8);
+        }
 
+        _previews.Clear();
         _pageHost.Children.Clear();
         var content = page.Build();
         _pageHost.Children.Add(content);
-
-        // Stagger the cards in.
-        if (content is Panel panel)
-        {
-            int n = 0;
-            foreach (UIElement child in panel.Children) Anim.EnterUp(child, 60 + n++ * 55);
-        }
+        _scroll.ScrollToTop();
+        Stagger(content);
     }
 
-    // ───────────────────────────── pages ─────────────────────────────
+    private static void Stagger(UIElement content)
+    {
+        if (content is not Panel panel) return;
+        int n = 0;
+        foreach (UIElement child in panel.Children) Anim.EnterUp(child, 40 + n++ * 50);
+    }
+
+    private void ShowToast(string message)
+    {
+        _toastText.Text = message;
+        var fade = new DoubleAnimationUsingKeyFrames();
+        fade.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(200)), Anim.Out as EasingFunctionBase));
+        fade.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1700))));
+        fade.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(2000))));
+        _toast.BeginAnimation(OpacityProperty, fade);
+        _toastMove.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(20, 0, Theme.Ms(300)) { EasingFunction = new BackEase { Amplitude = 0.4, EasingMode = EasingMode.EaseOut } });
+    }
+
+    // ───────────────────────────── overlay pages ─────────────────────────────
+
+    /// <summary>Preview card on top, sub-tabs below; the selected tab's cards are swapped in with an animation.</summary>
+    private UIElement OverlayPage(string key, OverlaySettings s, OverlayWindow w, OverlayView preview, string showLabel,
+        (string Name, Func<UIElement[]> Cards)[] tabs)
+    {
+        var page = new StackPanel();
+        _previews.Add(preview);
+
+        // Live preview on a "track" background
+        var stage = new Border
+        {
+            CornerRadius = new CornerRadius(12), MinHeight = 170, Padding = new Thickness(20), ClipToBounds = true,
+            Background = new LinearGradientBrush(Theme.C("#FF2B3440"), Theme.C("#FF101318"), 65),
+        };
+        stage.Child = new Viewbox
+        {
+            Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, MaxHeight = 300,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            Child = preview,
+        };
+
+        var head = new Grid { Margin = new Thickness(0, 0, 0, 14) };
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var headText = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        headText.Children.Add(new TextBlock { Text = "Live preview", FontSize = 15, FontWeight = FontWeights.Bold, Foreground = Theme.B(Theme.TextColor) });
+        headText.Children.Add(new TextBlock { Text = "Updates as you change settings. Use demo data if the game isn't running.", FontSize = 12, Foreground = Theme.B(Theme.Muted), TextWrapping = TextWrapping.Wrap });
+        head.Children.Add(headText);
+        var headRight = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        if (!_demoRunning)
+        {
+            var demo = new PillButton("Run demo");
+            demo.Margin = new Thickness(0, 0, 14, 0);
+            demo.Click += () => { StartDemo(); demo.Visibility = Visibility.Collapsed; };
+            headRight.Children.Add(demo);
+        }
+        headRight.Children.Add(new TextBlock { Text = showLabel, Foreground = Theme.B(Theme.TextColor), FontSize = 13, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) });
+        headRight.Children.Add(Switch(s.Enabled, on => { s.Enabled = on; if (on) w.FadeIn(); else w.FadeOut(); RequestSave(); }));
+        Grid.SetColumn(headRight, 1);
+        head.Children.Add(headRight);
+
+        var previewCard = CardRaw(new StackPanel { Children = { head, stage } });
+        page.Children.Add(previewCard);
+
+        // Sub-tabs
+        var tabHost = new StackPanel();
+        void ShowTab(int i)
+        {
+            _subTab[key] = i;
+            tabHost.Children.Clear();
+            foreach (var card in tabs[i].Cards()) tabHost.Children.Add(card);
+            Stagger(tabHost);
+        }
+        var seg = new SegmentedTabs(tabs.Select(t => t.Name).ToArray(), _subTab[key]) { Margin = new Thickness(0, 0, 0, 14) };
+        seg.Selected += ShowTab;
+        page.Children.Add(seg);
+        page.Children.Add(tabHost);
+        ShowTab(_subTab[key]);
+        return page;
+    }
 
     private UIElement BuildLapLogPage()
     {
         var s = _settings.LapLog;
         var w = _lapLog;
-        var page = new StackPanel();
+        void C() { w.ApplyAppearance(); RequestSave(); }
 
-        page.Children.Add(Card("Overlay", null,
-            RowInline("Show lap time log", "Fades the overlay in or out on your screen",
-                Switch(s.Enabled, on => { s.Enabled = on; if (on) w.FadeIn(); else w.FadeOut(); RequestSave(); }))));
-
-        page.Children.Add(AppearanceCard(s, w));
-
-        page.Children.Add(Card("Content", "What the log shows",
-            RowStacked("Lap rows", MakeSlider(3, 20, 1, s.Rows, v => $"{v:0}", v => { s.Rows = (int)v; w.ApplyAppearance(); RequestSave(); })),
-            RowInline("Session best row", "Purple row with the fastest lap of any car", Switch(s.ShowSessionBest, on => { s.ShowSessionBest = on; w.ApplyAppearance(); RequestSave(); })),
-            RowInline("Gap to personal best", "PS. BEST column", Switch(s.ShowDelta, on => { s.ShowDelta = on; w.ApplyAppearance(); RequestSave(); })),
-            RowInline("Fuel column", "Fuel left at the end of each lap", Switch(s.ShowFuel, on => { s.ShowFuel = on; w.ApplyAppearance(); RequestSave(); }))));
-
-        page.Children.Add(Card("Colours", null,
-            RowStacked("Accent stripe", Swatches(s.AccentColor, c => { s.AccentColor = c; RequestSave(); })),
-            RowStacked("Session best", Swatches(s.SessionBestColor, c => { s.SessionBestColor = c; RequestSave(); })),
-            RowStacked("Column headers", Swatches(s.HeaderColor, c => { s.HeaderColor = c; RequestSave(); }))));
-
-        page.Children.Add(PositionCard(w));
-        return page;
+        return OverlayPage("laplog", s, w, new LapLogView(_hub, s), "Show in game",
+        [
+            ("Layout", () =>
+            [
+                Card("Size", "Changes apply live",
+                    RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
+                    RowStacked("Width", MakeSlider(200, 420, 5, s.Width, Px, v => { s.Width = v; C(); })),
+                    RowStacked("Row height", MakeSlider(18, 40, 1, s.RowHeight, Px, v => { s.RowHeight = v; C(); })),
+                    RowStacked("Text size", MakeSlider(0.6, 1.8, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); })),
+                    RowStacked("Lap rows", MakeSlider(3, 20, 1, s.Rows, v => $"{v:0}", v => { s.Rows = (int)v; C(); })),
+                    RowStacked("Corner radius", MakeSlider(0, 20, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
+                TransparencyCard(s, C),
+                FontCard(s, C),
+                PositionCard(w),
+            ]),
+            ("Content", () =>
+            [
+                Card("Sections", "Turn parts of the log on or off",
+                    RowInline("Accent stripe", "Thin coloured line on top", Switch(s.ShowAccentStripe, on => { s.ShowAccentStripe = on; C(); })),
+                    RowInline("Title bar", null, Switch(s.ShowTitle, on => { s.ShowTitle = on; C(); })),
+                    RowInline("Title text", null, TitleBox(s, C)),
+                    RowInline("Personal best row", "Your fastest valid lap this session", Switch(s.ShowPersonalBest, on => { s.ShowPersonalBest = on; C(); })),
+                    RowInline("Session best row", "Fastest valid lap of any car", Switch(s.ShowSessionBest, on => { s.ShowSessionBest = on; C(); })),
+                    RowInline("Column headers", "LAP / TIME / PS. BEST / FUEL", Switch(s.ShowColumnHeaders, on => { s.ShowColumnHeaders = on; C(); }))),
+                Card("Columns", null,
+                    RowInline("Gap to personal best", "PS. BEST column", Switch(s.ShowDelta, on => { s.ShowDelta = on; C(); })),
+                    RowInline("Fuel", "Fuel left at the end of each lap", Switch(s.ShowFuel, on => { s.ShowFuel = on; C(); }))),
+                Card("Rows", null,
+                    RowInline("Striped rows", "Alternate row shading", Switch(s.Stripes, on => { s.Stripes = on; C(); })),
+                    RowInline("Newest lap on top", "Off puts the newest lap at the bottom", Switch(s.NewestOnTop, on => { s.NewestOnTop = on; C(); }))),
+            ]),
+            ("Colours", () =>
+            [
+                Card("Panel", null,
+                    RowStacked("Background", Colour(s.BackgroundColor, c => { s.BackgroundColor = c; C(); })),
+                    RowStacked("Title bar & column headers", Colour(s.TitleBarColor, c => { s.TitleBarColor = c; C(); })),
+                    RowStacked("Row stripes", Colour(s.StripeColor, c => { s.StripeColor = c; C(); }))),
+                Card("Highlights", null,
+                    RowStacked("Accent stripe", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
+                    RowStacked("Personal best row", Colour(s.PersonalBestColor, c => { s.PersonalBestColor = c; C(); })),
+                    RowStacked("Session best row", Colour(s.SessionBestColor, c => { s.SessionBestColor = c; C(); }))),
+                Card("Text", null,
+                    RowStacked("Text", Colour(s.TextColor, c => { s.TextColor = c; C(); })),
+                    RowStacked("Column headers", Colour(s.HeaderColor, c => { s.HeaderColor = c; C(); })),
+                    RowStacked("Faster than PB", Colour(s.FasterColor, c => { s.FasterColor = c; C(); })),
+                    RowStacked("Slower than PB", Colour(s.SlowerColor, c => { s.SlowerColor = c; C(); }))),
+            ]),
+            ("Effects", () =>
+            [
+                Card("Animations", "Small touches when something happens",
+                    RowInline("New lap slides in", null, Switch(s.AnimateNewLap, on => { s.AnimateNewLap = on; C(); })),
+                    RowInline("Flash new lap", "Purple for session best, green for PB", Switch(s.FlashNewLap, on => { s.FlashNewLap = on; C(); })),
+                    RowInline("Glow when a best improves", "PB and session best rows light up briefly", Switch(s.GlowOnImprove, on => { s.GlowOnImprove = on; C(); }))),
+            ]),
+        ]);
     }
 
     private UIElement BuildInputsPage()
     {
         var s = _settings.Inputs;
         var w = _inputs;
+        void C() { w.ApplyAppearance(); RequestSave(); }
+
+        return OverlayPage("inputs", s, w, new InputsView(_hub, s), "Show in game",
+        [
+            ("Layout", () =>
+            [
+                Card("Size", "Changes apply live",
+                    RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
+                    RowStacked("Height", MakeSlider(40, 140, 2, s.Height, Px, v => { s.Height = v; C(); })),
+                    RowStacked("Trace width", MakeSlider(60, 400, 5, s.TraceWidth, Px, v => { s.TraceWidth = v; C(); })),
+                    RowStacked("Line thickness", MakeSlider(0.5, 5, 0.1, s.LineThickness, v => $"{v:0.0}", v => { s.LineThickness = v; C(); })),
+                    RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
+                TransparencyCard(s, C),
+                FontCard(s, C),
+                PositionCard(w),
+            ]),
+            ("Content", () =>
+            [
+                Card("Elements", null,
+                    RowInline("Gear", null, Switch(s.ShowGear, on => { s.ShowGear = on; C(); })),
+                    RowInline("Speed", null, Switch(s.ShowSpeed, on => { s.ShowSpeed = on; C(); })),
+                    RowInline("Pedal bars", "Throttle and brake bars", Switch(s.ShowBars, on => { s.ShowBars = on; C(); })),
+                    RowInline("Bar percentages", "Numbers above the bars", Switch(s.ShowBarValues, on => { s.ShowBarValues = on; C(); }))),
+                Card("Trace", null,
+                    RowInline("Show trace", "Scrolling throttle / brake graph", Switch(s.ShowTrace, on => { s.ShowTrace = on; C(); })),
+                    RowStacked("Trace length", MakeSlider(2, 10, 0.5, s.TraceSeconds, v => $"{v:0.#} s", v => { s.TraceSeconds = v; C(); })),
+                    RowInline("Fill under lines", null, Switch(s.FillTrace, on => { s.FillTrace = on; C(); })),
+                    RowInline("Grid lines", "25 / 50 / 75 % guides", Switch(s.GridLines, on => { s.GridLines = on; C(); }))),
+            ]),
+            ("Colours", () =>
+            [
+                Card("Panel", null,
+                    RowStacked("Background", Colour(s.BackgroundColor, c => { s.BackgroundColor = c; C(); })),
+                    RowStacked("Trace background", Colour(s.TraceBackgroundColor, c => { s.TraceBackgroundColor = c; C(); }))),
+                Card("Elements", null,
+                    RowStacked("Gear", Colour(s.GearColor, c => { s.GearColor = c; C(); })),
+                    RowStacked("Speed", Colour(s.SpeedColor, c => { s.SpeedColor = c; C(); })),
+                    RowStacked("Throttle", Colour(s.ThrottleColor, c => { s.ThrottleColor = c; C(); })),
+                    RowStacked("Brake", Colour(s.BrakeColor, c => { s.BrakeColor = c; C(); }))),
+            ]),
+            ("Effects", () =>
+            [
+                Card("Motion", null,
+                    RowInline("Smooth pedal bars", "Off shows the raw value every frame", Switch(s.SmoothBars, on => { s.SmoothBars = on; C(); }))),
+            ]),
+        ]);
+    }
+
+    // ───────────────────────────── themes & general ─────────────────────────────
+
+    private UIElement BuildThemesPage()
+    {
         var page = new StackPanel();
+        var grid = new WrapPanel();
 
-        page.Children.Add(Card("Overlay", null,
-            RowInline("Show inputs overlay", "Gear, speed, trace and pedal bars",
-                Switch(s.Enabled, on => { s.Enabled = on; if (on) w.FadeIn(); else w.FadeOut(); RequestSave(); }))));
+        foreach (var theme in OverlayTheme.All)
+        {
+            var bg = new SolidColorBrush(Theme.Card);
+            var scale = new ScaleTransform(1, 1);
+            var sp = new StackPanel();
 
-        page.Children.Add(AppearanceCard(s, w));
+            // Mini mock of the lap log in the theme's colours
+            var mock = new Border
+            {
+                Height = 86, CornerRadius = new CornerRadius(Math.Min(theme.Radius, 10)), Background = Theme.B(theme.Background),
+                ClipToBounds = true, Margin = new Thickness(0, 0, 0, 12),
+            };
+            var mockStack = new StackPanel();
+            mockStack.Children.Add(new Border { Height = 3, Background = Theme.B(theme.Accent) });
+            mockStack.Children.Add(new Border { Height = 14, Background = Theme.B(theme.TitleBar) });
+            mockStack.Children.Add(new Border { Height = 18, Background = Theme.B(theme.SessionBest) });
+            for (int i = 0; i < 3; i++)
+            {
+                var r = new Grid { Height = 17, Background = Theme.B(i % 2 == 0 ? theme.Stripe : theme.Background) };
+                r.Children.Add(new Border { Width = 26, Height = 4, CornerRadius = new CornerRadius(2), Background = Theme.B(theme.Text), Opacity = 0.8, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(8, 0, 0, 0) });
+                r.Children.Add(new Border { Width = 22, Height = 4, CornerRadius = new CornerRadius(2), Background = Theme.B(i == 0 ? theme.Throttle : theme.Brake), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 0, 8, 0) });
+                mockStack.Children.Add(r);
+            }
+            mock.Child = mockStack;
+            sp.Children.Add(mock);
 
-        page.Children.Add(Card("Content", null,
-            RowStacked("Trace length", MakeSlider(2, 10, 0.5, s.TraceSeconds, v => $"{v:0.#} s", v => { s.TraceSeconds = v; RequestSave(); })),
-            RowInline("Speed", "Shown under the gear", Switch(s.ShowSpeed, on => { s.ShowSpeed = on; w.ApplyAppearance(); RequestSave(); })),
-            RowInline("Pedal bars", "Throttle and brake bars on the right", Switch(s.ShowBars, on => { s.ShowBars = on; w.ApplyAppearance(); RequestSave(); })),
-            RowInline("Fill under trace", "Soft colour under the throttle and brake lines", Switch(s.FillTrace, on => { s.FillTrace = on; RequestSave(); }))));
+            sp.Children.Add(new TextBlock { Text = theme.Name, FontSize = 14, FontWeight = FontWeights.Bold, Foreground = Theme.B(Theme.TextColor) });
+            var dots = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+            foreach (var hex in new[] { theme.Accent, theme.Header, theme.Gear, theme.Throttle, theme.Brake })
+                dots.Children.Add(new Ellipse { Width = 10, Height = 10, Fill = Theme.B(hex), Margin = new Thickness(0, 0, 5, 0) });
+            dots.Children.Add(new TextBlock { Text = theme.Font, FontSize = 11, Foreground = Theme.B(Theme.Muted), Margin = new Thickness(4, -2, 0, 0) });
+            sp.Children.Add(dots);
 
-        page.Children.Add(Card("Colours", null,
-            RowStacked("Gear", Swatches(s.GearColor, c => { s.GearColor = c; RequestSave(); })),
-            RowStacked("Throttle", Swatches(s.ThrottleColor, c => { s.ThrottleColor = c; RequestSave(); })),
-            RowStacked("Brake", Swatches(s.BrakeColor, c => { s.BrakeColor = c; RequestSave(); }))));
+            var card = new Border
+            {
+                Width = 196, Margin = new Thickness(0, 0, 14, 14), Padding = new Thickness(14), CornerRadius = new CornerRadius(14),
+                Background = bg, BorderBrush = Theme.B(Theme.Line), BorderThickness = new Thickness(1), Cursor = Cursors.Hand,
+                RenderTransformOrigin = new Point(0.5, 0.5), RenderTransform = scale, Child = sp,
+            };
+            card.MouseEnter += (_, _) => { Anim.ColorTo(bg, Theme.CardHover, 150); Anim.To(scale, ScaleTransform.ScaleXProperty, 1.03, 150); Anim.To(scale, ScaleTransform.ScaleYProperty, 1.03, 150); };
+            card.MouseLeave += (_, _) => { Anim.ColorTo(bg, Theme.Card, 200); Anim.To(scale, ScaleTransform.ScaleXProperty, 1, 200); Anim.To(scale, ScaleTransform.ScaleYProperty, 1, 200); };
+            card.MouseLeftButtonUp += (_, _) =>
+            {
+                theme.ApplyTo(_settings);
+                _lapLog.ApplyAppearance();
+                _inputs.ApplyAppearance();
+                RequestSave();
+                ShowToast($"{theme.Name} applied");
+            };
+            grid.Children.Add(card);
+        }
 
-        page.Children.Add(PositionCard(w));
+        page.Children.Add(Card("Pick a theme", "Sets colours, font and corner radius on both overlays. You can still fine-tune everything afterwards.", grid));
         return page;
     }
 
@@ -322,7 +556,7 @@ public sealed class ControlWindow : Window
 
         page.Children.Add(Card("Overlays", null,
             RowInline("Lock overlays", "Clicks go through to the game. Unlock to drag overlays (they get a dashed outline).",
-                Switch(_settings.Locked, on => { _settings.Locked = on; _lapLog.SetLocked(on); _inputs.SetLocked(on); RequestSave(); }))));
+                Switch(_settings.Locked, on => SetLocked(on)))));
 
         var dataButtons = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
         var folder = new PillButton("Open lap folder");
@@ -332,13 +566,7 @@ public sealed class ControlWindow : Window
             Process.Start(new ProcessStartInfo("explorer.exe", Settings.LapLogDir) { UseShellExecute = true });
         };
         var demo = new PillButton(_demoRunning ? "Demo running" : "Run demo data", primary: !_demoRunning);
-        demo.Click += () =>
-        {
-            if (_demoRunning) return;
-            _demoRunning = true;
-            Task.Run(() => DemoSender.Run(_port, _ct));
-            ((TextBlock)demo.Child).Text = "Demo running";
-        };
+        demo.Click += () => { StartDemo(); ((TextBlock)demo.Child).Text = "Demo running"; };
         dataButtons.Children.Add(demo);
         dataButtons.Children.Add(folder);
 
@@ -360,8 +588,9 @@ public sealed class ControlWindow : Window
             _lapLog.ResetPosition(); _inputs.ResetPosition();
             if (!lapOn) _lapLog.FadeIn();
             if (!inOn) _inputs.FadeIn();
+            _subTab["laplog"] = _subTab["inputs"] = 0;
             RequestSave();
-            SelectPage(2);
+            ShowToast("Everything reset to default");
         };
         page.Children.Add(Card("Reset", "Puts colours, sizes and positions of both overlays back to default.", reset));
         return page;
@@ -369,25 +598,72 @@ public sealed class ControlWindow : Window
 
     // ───────────────────────────── building blocks ─────────────────────────────
 
-    private Border AppearanceCard(OverlaySettings s, OverlayWindow w) =>
-        Card("Appearance", "Changes apply live",
-            RowStacked("Size", MakeSlider(0.5, 2.0, 0.05, s.Scale, v => $"{v * 100:0}%", v => { s.Scale = v; w.ApplyAppearance(); RequestSave(); })),
-            RowStacked("Opacity", MakeSlider(0.2, 1.0, 0.05, s.Opacity, v => $"{v * 100:0}%", v => { s.Opacity = v; w.ApplyAppearance(); RequestSave(); })),
-            RowStacked("Background", MakeSlider(0, 1.0, 0.05, s.BackgroundOpacity, v => $"{v * 100:0}%", v => { s.BackgroundOpacity = v; RequestSave(); })));
+    private static string Pct(double v) => $"{v * 100:0}%";
+    private static string Px(double v) => $"{v:0} px";
+
+    private void SetLocked(bool on)
+    {
+        _settings.Locked = on;
+        _lapLog.SetLocked(on);
+        _inputs.SetLocked(on);
+        RequestSave();
+    }
+
+    private void StartDemo()
+    {
+        if (_demoRunning) return;
+        _demoRunning = true;
+        Task.Run(() => DemoSender.Run(_port, _ct));
+        ShowToast("Demo data running");
+    }
+
+    private Border TransparencyCard(OverlaySettings s, Action changed) =>
+        Card("Transparency", null,
+            RowStacked("Overall opacity", MakeSlider(0.2, 1.0, 0.05, s.Opacity, Pct, v => { s.Opacity = v; changed(); })),
+            RowStacked("Background opacity", MakeSlider(0, 1.0, 0.05, s.BackgroundOpacity, Pct, v => { s.BackgroundOpacity = v; changed(); })));
+
+    private static Border FontCard(OverlaySettings s, Action changed)
+    {
+        var chips = new ChoiceChips(FontChoices, s.FontFamily, previewFont: true);
+        chips.Changed += f => { s.FontFamily = f; changed(); };
+        return Card("Font", "Bahnschrift gives a condensed, racing-style look", chips);
+    }
+
+    private static TextBox TitleBox(LapLogSettings s, Action changed)
+    {
+        var box = Ui.TextField(s.TitleText, 170);
+        box.TextChanged += (_, _) => { s.TitleText = box.Text; changed(); };
+        return box;
+    }
 
     private Border PositionCard(OverlayWindow w)
     {
         var reset = new PillButton("Reset position");
         reset.Click += w.ResetPosition;
-        var unlock = new PillButton("Unlock to move");
+        var unlock = new PillButton(_settings.Locked ? "Unlock to move" : "Lock in place", primary: _settings.Locked);
         unlock.Click += () =>
         {
-            _settings.Locked = false; _lapLog.SetLocked(false); _inputs.SetLocked(false); RequestSave();
+            SetLocked(!_settings.Locked);
+            ((TextBlock)unlock.Child).Text = _settings.Locked ? "Unlock to move" : "Lock in place";
+            ShowToast(_settings.Locked ? "Overlays locked" : "Overlays unlocked: drag them into place");
         };
         var row = new WrapPanel();
         row.Children.Add(unlock);
         row.Children.Add(reset);
-        return Card("Position", "Unlock, then drag the overlay with your mouse. Lock it again in General.", row);
+        return Card("Position", "Unlock, drag the overlay with your mouse, then lock it again.", row);
+    }
+
+    private static Border CardRaw(UIElement child)
+    {
+        var bg = new SolidColorBrush(Theme.Card);
+        var card = new Border
+        {
+            CornerRadius = new CornerRadius(14), Background = bg, BorderBrush = Theme.B(Theme.Line), BorderThickness = new Thickness(1),
+            Padding = new Thickness(20, 18, 20, 18), Margin = new Thickness(0, 0, 0, 14), Child = child,
+        };
+        card.MouseEnter += (_, _) => Anim.ColorTo(bg, Theme.CardHover, 200);
+        card.MouseLeave += (_, _) => Anim.ColorTo(bg, Theme.Card, 300);
+        return card;
     }
 
     private static Border Card(string title, string? subtitle, params UIElement[] rows)
@@ -403,16 +679,7 @@ public sealed class ControlWindow : Window
             else sp.Children.Add(new Border { Height = 14 });
             sp.Children.Add(rows[i]);
         }
-
-        var bg = new SolidColorBrush(Theme.Card);
-        var card = new Border
-        {
-            CornerRadius = new CornerRadius(14), Background = bg, BorderBrush = Theme.B(Theme.Line), BorderThickness = new Thickness(1),
-            Padding = new Thickness(20, 18, 20, 18), Margin = new Thickness(0, 0, 0, 14), Child = sp,
-        };
-        card.MouseEnter += (_, _) => Anim.ColorTo(bg, Theme.CardHover, 200);
-        card.MouseLeave += (_, _) => Anim.ColorTo(bg, Theme.Card, 300);
-        return card;
+        return CardRaw(sp);
     }
 
     private static UIElement RowInline(string label, string? description, UIElement control)
@@ -452,11 +719,11 @@ public sealed class ControlWindow : Window
         return s;
     }
 
-    private static ColorSwatches Swatches(string selected, Action<string> changed)
+    private static ColorField Colour(string selected, Action<string> changed)
     {
-        var s = new ColorSwatches(selected);
-        s.ColorChanged += changed;
-        return s;
+        var f = new ColorField(selected);
+        f.ColorChanged += changed;
+        return f;
     }
 
     // ───────────────────────────── loop & lifecycle ─────────────────────────────
@@ -471,6 +738,8 @@ public sealed class ControlWindow : Window
     {
         if (_lapLog.IsVisible) _lapLog.View.InvalidateVisual();
         if (_inputs.IsVisible) _inputs.View.InvalidateVisual();
+        if (WindowState != WindowState.Minimized)
+            foreach (var p in _previews) { p.InvalidateMeasure(); p.InvalidateVisual(); }
     }
 
     private void UpdateStatus()
@@ -509,7 +778,7 @@ public sealed class ControlWindow : Window
         _lapLog.FadeOut();
         _inputs.FadeOut();
         var fade = new DoubleAnimation(0, Theme.Ms(180)) { EasingFunction = Anim.Out };
-        fade.Completed += (_, _) => Close();
+        fade.Completed += (_, _) => Dispatcher.BeginInvoke(new Action(Close));
         _root.BeginAnimation(OpacityProperty, fade);
         Anim.To(_rootScale, ScaleTransform.ScaleXProperty, 0.96, 180);
         Anim.To(_rootScale, ScaleTransform.ScaleYProperty, 0.96, 180);
