@@ -71,6 +71,8 @@ public sealed class ControlWindow : Window
         ResizeMode = ResizeMode.CanMinimize;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         FontFamily = Theme.Font;
+        try { Icon = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri("pack://application:,,,/app.ico")); }
+        catch { /* icon is cosmetic */ }
 
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); _settings.Save(); };
 

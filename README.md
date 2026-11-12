@@ -9,6 +9,12 @@ Two apps that share the same packet code:
 
 Both listen on UDP **20999** (SimHub forwards there from 20777).
 
+## Install as a desktop app
+
+Double-click **`install.cmd`** in this folder. It builds the app and adds **F1 26 Overlay Studio** to the Start menu and the desktop, so you can open it like any other program: press the Windows key and type "F1 26".
+
+To get updates later, double-click **`update.cmd`**. It runs `git pull` and reinstalls the app.
+
 ## Overlays
 
 ```

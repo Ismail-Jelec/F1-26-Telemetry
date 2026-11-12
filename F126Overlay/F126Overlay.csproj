@@ -9,11 +9,18 @@
     <RootNamespace>F126Overlay</RootNamespace>
     <AssemblyName>F126Overlay</AssemblyName>
     <StartupObject>F126Overlay.Program</StartupObject>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <Product>F1 26 Overlay Studio</Product>
+    <Version>3.1.0</Version>
   </PropertyGroup>
 
   <!-- WPF projects leave System.IO out of the implicit usings; add it back -->
   <ItemGroup>
     <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="app.ico" />
   </ItemGroup>
 
   <!-- Shared packet decoding from the console app -->
