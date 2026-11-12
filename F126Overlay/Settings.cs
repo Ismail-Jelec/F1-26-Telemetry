@@ -82,6 +82,35 @@ public sealed class InputsSettings : OverlaySettings
     public bool SmoothBars { get; set; } = true;
 }
 
+public sealed class TrackLimitsSettings : OverlaySettings
+{
+    public TrackLimitsSettings() { CornerRadius = 8; }
+
+    // Layout
+    public double Width { get; set; } = 210;
+    public double TextScale { get; set; } = 1.0;
+    public int WarningLimit { get; set; } = 3;
+
+    // Content
+    public bool ShowAccentStripe { get; set; } = true;
+    public bool ShowTitle { get; set; } = true;
+    public string TitleText { get; set; } = "TRACK LIMITS";
+    public bool ShowPips { get; set; } = true;
+    public bool ShowInvalidLaps { get; set; } = true;
+    public bool ShowTotalWarnings { get; set; } = true;
+    public bool ShowPenalties { get; set; } = true;
+
+    // Colours
+    public string AccentColor { get; set; } = "#E10600";
+    public string TextColor { get; set; } = "#FFFFFF";
+    public string OkColor { get; set; } = "#2BD34F";
+    public string WarnColor { get; set; } = "#FFD400";
+    public string DangerColor { get; set; } = "#FF2E2E";
+
+    // Effects
+    public bool FlashOnWarning { get; set; } = true;
+}
+
 /// <summary>User settings, saved as JSON in %AppData%\F126Overlay\settings.json.</summary>
 public sealed class Settings
 {
@@ -90,6 +119,7 @@ public sealed class Settings
     public bool LogLaps { get; set; } = true;
     public LapLogSettings LapLog { get; set; } = new();
     public InputsSettings Inputs { get; set; } = new();
+    public TrackLimitsSettings TrackLimits { get; set; } = new();
 
     private static readonly string Dir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "F126Overlay");
@@ -104,6 +134,7 @@ public sealed class Settings
                 var s = JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath)) ?? new Settings();
                 s.LapLog ??= new();
                 s.Inputs ??= new();
+                s.TrackLimits ??= new();
                 return s;
             }
         }
@@ -153,7 +184,7 @@ public sealed record OverlayTheme(
 
     public void ApplyTo(Settings s)
     {
-        foreach (OverlaySettings o in new OverlaySettings[] { s.LapLog, s.Inputs })
+        foreach (OverlaySettings o in new OverlaySettings[] { s.LapLog, s.Inputs, s.TrackLimits })
         {
             o.BackgroundColor = Background;
             o.FontFamily = Font;
@@ -164,5 +195,7 @@ public sealed record OverlayTheme(
         l.SessionBestColor = SessionBest; l.HeaderColor = Header; l.TextColor = Text;
         var i = s.Inputs;
         i.GearColor = Gear; i.SpeedColor = Text; i.ThrottleColor = Throttle; i.BrakeColor = Brake;
+        var t = s.TrackLimits;
+        t.AccentColor = Accent; t.TextColor = Text; t.OkColor = Throttle; t.DangerColor = Brake;
     }
 }

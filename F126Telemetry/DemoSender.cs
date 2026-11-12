@@ -54,7 +54,13 @@ public static class DemoSender
             var hdr = (PacketId id) => new Header(id, uid, sessionTime, frame);
 
             if (frame % 60 == 1) Send(udp, target, BuildSession(hdr(PacketId.Session)));
-            Send(udp, target, BuildLap(hdr(PacketId.LapData), lastLapMs, lapTimeMs, s1, s2, lapDist, totalDist, lapNum, sector));
+            // Every third lap gets a track-limits warning partway round and is invalidated.
+            bool badLap = lapNum % 3 == 0;
+            bool cut = badLap && lapDist > TrackLength * 0.4;
+            int warnings = (lapNum - 1) / 3 + (cut ? 1 : 0);
+            int penalties = warnings >= 3 ? 5 : 0;
+            Send(udp, target, BuildLap(hdr(PacketId.LapData), lastLapMs, lapTimeMs, s1, s2, lapDist, totalDist, lapNum, sector,
+                cut, penalties, warnings));
             Send(udp, target, BuildTelemetry(hdr(PacketId.CarTelemetry), (ushort)speed, throttle, steer, brake, gear, rpm));
             Send(udp, target, BuildStatus(hdr(PacketId.CarStatus), ers, fuel));
             Send(udp, target, BuildTelemetry2(hdr(PacketId.CarTelemetry2), throttle > 0.95f));
@@ -86,7 +92,8 @@ public static class DemoSender
         new Writer(Spec.SessionPacketSize).WriteHeader(h)
             .U8(1).U8(34).U8(22).U8(10).U16((int)TrackLength).U8(18).U8(7).Buf; // Time Trial, Silverstone
 
-    private static byte[] BuildLap(Header h, uint last, uint cur, uint s1, uint s2, float dist, float total, int lapNum, byte sector)
+    private static byte[] BuildLap(Header h, uint last, uint cur, uint s1, uint s2, float dist, float total, int lapNum, byte sector,
+        bool invalid, int penalties, int warnings)
     {
         var w = new Writer(Spec.LapDataPacketSize).WriteHeader(h)
             .U32(last).U32(cur)
@@ -94,7 +101,7 @@ public static class DemoSender
             .U16((int)(s2 % 60000)).U8((int)(s2 / 60000))
             .U16(0).U8(0).U16(0).U8(0)
             .F32(dist).F32(total).F32(0)
-            .U8(1).U8(lapNum).U8(0).U8(0).U8(sector).U8(0).U8(0).U8(0).U8(0).U8(0).U8(0).U8(1)
+            .U8(1).U8(lapNum).U8(0).U8(0).U8(sector).U8(invalid ? 1 : 0).U8(penalties).U8(warnings).U8(warnings).U8(0).U8(0).U8(1)
             .U8(4).U8(2).U8(0).U16(0).U16(0).U8(0).F32(320f).U8(1);
         return w.Buf;
     }

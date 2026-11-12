@@ -30,6 +30,7 @@ The control panel (Overlay Studio) has four pages:
   - **Content:** turn individual parts on or off (title, PB/SB rows, columns, gear, speed, trace, bars...)
   - **Colours:** each element separately, from presets or any hex colour
   - **Effects:** new-lap slide and flash, glow on improvement, smooth pedal bars
+- **Track limits**: separate overlay counting corner-cutting warnings against your limit (pips, colour changes, flash), plus invalid laps, total warnings and penalties
 - **Themes**: one-click looks (Classic F1, Midnight, Neon, Stealth, Papaya, Racing Green)
 - **General**: lock overlays, lap CSV logging, demo data, reset
 
@@ -40,4 +41,4 @@ Positions and settings are saved in `%AppData%\F126Overlay\settings.json`. Lap C
 ### Lap time log
 - **Personal session best:** your fastest valid lap this session
 - **Session best (purple):** the fastest valid lap by any car this session
-- **Lap rows:** your last 8 laps, each with its gap to your PB (red if slower, `PB` in green for your best lap, `INVALID` for invalid laps) and the fuel left at the end of the lap. Fuel is in kg, the unit the game reports.
+- **Lap rows:** your last 8 laps, each with its gap to your PB (red if slower, `PB` in green for your best lap). Invalid laps keep their delta but the lap time is struck through and the fuel left at the end of the lap. Fuel is in kg, the unit the game reports.

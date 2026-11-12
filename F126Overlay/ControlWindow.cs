@@ -29,6 +29,7 @@ public sealed class ControlWindow : Window
 
     private readonly OverlayWindow _lapLog;
     private readonly OverlayWindow _inputs;
+    private readonly OverlayWindow _limits;
 
     private readonly Border _root;
     private readonly ScaleTransform _rootScale = new(0.96, 0.96);
@@ -38,7 +39,7 @@ public sealed class ControlWindow : Window
     private readonly TextBlock _pageSubtitle = new();
     private readonly List<(NavItem Item, Func<UIElement> Build, string Title, string Subtitle)> _pages = [];
     private int _currentPage;
-    private readonly Dictionary<string, int> _subTab = new() { ["laplog"] = 0, ["inputs"] = 0 };
+    private readonly Dictionary<string, int> _subTab = new() { ["laplog"] = 0, ["inputs"] = 0, ["limits"] = 0 };
     private readonly List<OverlayView> _previews = [];
 
     private readonly Ellipse _liveDot = new() { Width = 8, Height = 8 };
@@ -83,6 +84,8 @@ public sealed class ControlWindow : Window
             new Point(area.Right - 300, area.Top + 120), RequestSave);
         _inputs = new OverlayWindow("Inputs", new InputsView(hub, settings.Inputs), settings.Inputs,
             new Point(area.Left + area.Width / 2 - 140, area.Bottom - 130), RequestSave);
+        _limits = new OverlayWindow("Track limits", new TrackLimitsView(hub, settings.TrackLimits), settings.TrackLimits,
+            new Point(area.Left + 40, area.Top + 120), RequestSave);
 
         // Window shell
         _root = new Border
@@ -129,6 +132,7 @@ public sealed class ControlWindow : Window
 
         _pages.Add((null!, BuildLapLogPage, "Lap time log", "Personal best, session best and your latest laps"));
         _pages.Add((null!, BuildInputsPage, "Inputs", "Gear, speed and a live throttle / brake trace"));
+        _pages.Add((null!, BuildTrackLimitsPage, "Track limits", "Corner-cutting warnings, invalid laps and penalties"));
         _pages.Add((null!, BuildThemesPage, "Themes", "One-click looks for both overlays"));
         _pages.Add((null!, BuildGeneralPage, "General", "Locking, lap logging, demo data and reset"));
         BuildNav();
@@ -141,8 +145,10 @@ public sealed class ControlWindow : Window
 
             if (_settings.LapLog.Enabled) _lapLog.FadeIn();
             if (_settings.Inputs.Enabled) _inputs.FadeIn();
+            if (_settings.TrackLimits.Enabled) _limits.FadeIn();
             _lapLog.SetLocked(_settings.Locked);
             _inputs.SetLocked(_settings.Locked);
+            _limits.SetLocked(_settings.Locked);
             SelectPage(0);
         };
         Closing += OnClosing;
@@ -205,7 +211,7 @@ public sealed class ControlWindow : Window
 
     private void BuildNav()
     {
-        string[] icons = ["", "", "", ""];
+        string[] icons = ["\uE823", "\uE7FC", "\uE7BA", "\uE790", "\uE713"];
         for (int i = 0; i < _pages.Count; i++)
         {
             int index = i;
@@ -487,6 +493,58 @@ public sealed class ControlWindow : Window
         ]);
     }
 
+    private UIElement BuildTrackLimitsPage()
+    {
+        var s = _settings.TrackLimits;
+        var w = _limits;
+        void C() { w.ApplyAppearance(); RequestSave(); }
+
+        return OverlayPage("limits", s, w, new TrackLimitsView(_hub, s), "Show in game",
+        [
+            ("Layout", () =>
+            [
+                Card("Size", "Changes apply live",
+                    RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
+                    RowStacked("Width", MakeSlider(150, 360, 5, s.Width, Px, v => { s.Width = v; C(); })),
+                    RowStacked("Text size", MakeSlider(0.6, 1.8, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); })),
+                    RowStacked("Corner radius", MakeSlider(0, 24, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
+                TransparencyCard(s, C),
+                FontCard(s, C),
+                PositionCard(w),
+            ]),
+            ("Content", () =>
+            [
+                Card("Warning limit", "How many corner-cutting warnings you get before a penalty. Match it to your lobby's settings.",
+                    RowStacked("Warnings before penalty", MakeSlider(1, 10, 1, s.WarningLimit, v => $"{v:0}", v => { s.WarningLimit = (int)v; C(); }))),
+                Card("Sections", null,
+                    RowInline("Accent stripe", null, Switch(s.ShowAccentStripe, on => { s.ShowAccentStripe = on; C(); })),
+                    RowInline("Title bar", null, Switch(s.ShowTitle, on => { s.ShowTitle = on; C(); })),
+                    RowInline("Title text", null, TextInput(s.TitleText, t => { s.TitleText = t; C(); })),
+                    RowInline("Warning pips", "One bar per warning up to your limit", Switch(s.ShowPips, on => { s.ShowPips = on; C(); }))),
+                Card("Stats", null,
+                    RowInline("Invalid laps", "Laps invalidated this session, including the current one", Switch(s.ShowInvalidLaps, on => { s.ShowInvalidLaps = on; C(); })),
+                    RowInline("Total warnings", "All warnings, not only track limits", Switch(s.ShowTotalWarnings, on => { s.ShowTotalWarnings = on; C(); })),
+                    RowInline("Penalties", "Time penalties in seconds", Switch(s.ShowPenalties, on => { s.ShowPenalties = on; C(); }))),
+            ]),
+            ("Colours", () =>
+            [
+                Card("Panel", null,
+                    RowStacked("Background", Colour(s.BackgroundColor, c => { s.BackgroundColor = c; C(); })),
+                    RowStacked("Accent stripe", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
+                    RowStacked("Text", Colour(s.TextColor, c => { s.TextColor = c; C(); }))),
+                Card("Status", "The counter changes colour as you collect warnings",
+                    RowStacked("Clean (0 warnings)", Colour(s.OkColor, c => { s.OkColor = c; C(); })),
+                    RowStacked("Warning", Colour(s.WarnColor, c => { s.WarnColor = c; C(); })),
+                    RowStacked("Last warning / limit reached", Colour(s.DangerColor, c => { s.DangerColor = c; C(); }))),
+            ]),
+            ("Effects", () =>
+            [
+                Card("Animations", null,
+                    RowInline("Flash on new warning", "The panel lights up in the status colour", Switch(s.FlashOnWarning, on => { s.FlashOnWarning = on; C(); }))),
+            ]),
+        ]);
+    }
+
     // ───────────────────────────── themes & general ─────────────────────────────
 
     private UIElement BuildThemesPage()
@@ -540,13 +598,14 @@ public sealed class ControlWindow : Window
                 theme.ApplyTo(_settings);
                 _lapLog.ApplyAppearance();
                 _inputs.ApplyAppearance();
+                _limits.ApplyAppearance();
                 RequestSave();
                 ShowToast($"{theme.Name} applied");
             };
             grid.Children.Add(card);
         }
 
-        page.Children.Add(Card("Pick a theme", "Sets colours, font and corner radius on both overlays. You can still fine-tune everything afterwards.", grid));
+        page.Children.Add(Card("Pick a theme", "Sets colours, font and corner radius on all overlays. You can still fine-tune everything afterwards.", grid));
         return page;
     }
 
@@ -579,18 +638,20 @@ public sealed class ControlWindow : Window
         var reset = new PillButton("Reset all settings");
         reset.Click += () =>
         {
-            bool lapOn = _settings.LapLog.Enabled, inOn = _settings.Inputs.Enabled;
+            bool lapOn = _settings.LapLog.Enabled, inOn = _settings.Inputs.Enabled, limOn = _settings.TrackLimits.Enabled;
             _settings.LapLog.ResetToDefaults();
             _settings.Inputs.ResetToDefaults();
-            _lapLog.ApplyAppearance(); _inputs.ApplyAppearance();
-            _lapLog.ResetPosition(); _inputs.ResetPosition();
+            _settings.TrackLimits.ResetToDefaults();
+            _lapLog.ApplyAppearance(); _inputs.ApplyAppearance(); _limits.ApplyAppearance();
+            _lapLog.ResetPosition(); _inputs.ResetPosition(); _limits.ResetPosition();
             if (!lapOn) _lapLog.FadeIn();
             if (!inOn) _inputs.FadeIn();
-            _subTab["laplog"] = _subTab["inputs"] = 0;
+            if (!limOn) _limits.FadeIn();
+            _subTab["laplog"] = _subTab["inputs"] = _subTab["limits"] = 0;
             RequestSave();
             ShowToast("Everything reset to default");
         };
-        page.Children.Add(Card("Reset", "Puts colours, sizes and positions of both overlays back to default.", reset));
+        page.Children.Add(Card("Reset", "Puts colours, sizes and positions of all overlays back to default.", reset));
         return page;
     }
 
@@ -604,6 +665,7 @@ public sealed class ControlWindow : Window
         _settings.Locked = on;
         _lapLog.SetLocked(on);
         _inputs.SetLocked(on);
+        _limits.SetLocked(on);
         RequestSave();
     }
 
@@ -701,6 +763,13 @@ public sealed class ControlWindow : Window
         var chips = new ChoiceChips(FontChoices, s.FontFamily, previewFont: true);
         chips.Changed += f => { s.FontFamily = f; changed(); };
         return Card("Font", "Bahnschrift gives a condensed, racing-style look", chips);
+    }
+
+    private static TextBox TextInput(string initial, Action<string> changed)
+    {
+        var box = Ui.TextField(initial, 170);
+        box.TextChanged += (_, _) => changed(box.Text);
+        return box;
     }
 
     private static TextBox TitleBox(LapLogSettings s, Action changed)
@@ -812,6 +881,7 @@ public sealed class ControlWindow : Window
     {
         if (_lapLog.IsVisible) _lapLog.View.InvalidateVisual();
         if (_inputs.IsVisible) _inputs.View.InvalidateVisual();
+        if (_limits.IsVisible) _limits.View.InvalidateVisual();
         if (WindowState != WindowState.Minimized)
             foreach (var p in _previews) { p.InvalidateMeasure(); p.InvalidateVisual(); }
     }
@@ -852,6 +922,7 @@ public sealed class ControlWindow : Window
         _closing = true;
         _lapLog.FadeOut();
         _inputs.FadeOut();
+        _limits.FadeOut();
         var fade = new DoubleAnimation(0, Theme.Ms(180)) { EasingFunction = Anim.Out };
         fade.Completed += (_, _) => Dispatcher.BeginInvoke(new Action(Close));
         _root.BeginAnimation(OpacityProperty, fade);

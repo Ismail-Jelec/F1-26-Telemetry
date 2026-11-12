@@ -42,7 +42,7 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
             Math.Max(1, size), brush, VisualTreeHelper.GetDpi(this).PixelsPerDip);
 
     /// <summary>Draws text with x as left, right or centre anchor and y as the vertical centre.</summary>
-    protected void DrawText(DrawingContext dc, string s, double size, Brush brush, double x, double yCenter,
+    protected Rect DrawText(DrawingContext dc, string s, double size, Brush brush, double x, double yCenter,
         TextAlignment align = TextAlignment.Left, bool heavy = false)
     {
         var ft = Text(s, size, brush, heavy);
@@ -52,7 +52,9 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
             TextAlignment.Center => x - ft.Width / 2,
             _ => x,
         };
-        dc.DrawText(ft, new Point(Math.Round(left), Math.Round(yCenter - ft.Height / 2)));
+        var origin = new Point(Math.Round(left), Math.Round(yCenter - ft.Height / 2));
+        dc.DrawText(ft, origin);
+        return new Rect(origin, new Size(ft.Width, ft.Height));
     }
 
     /// <summary>Background for the whole overlay, clipped to rounded corners. Call Pop() at the end.</summary>
@@ -213,7 +215,14 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
 
             double cy = ry + rowH / 2;
             DrawText(dc, lap.Lap.ToString(CultureInfo.InvariantCulture), 12 * fs, text, 10, cy, heavy: true);
-            DrawText(dc, LapTime(lap.TimeMs), 12 * fs, lap.Valid ? text : grey, timeX, cy);
+            var timeRect = DrawText(dc, LapTime(lap.TimeMs), 12 * fs, lap.Valid ? text : grey, timeX, cy);
+            if (!lap.Valid)
+            {
+                // Strike through: the lap still shows its time and delta, but it didn't count.
+                var strike = new Pen(Theme.Brush(s.SlowerColor, 0.9), Math.Max(1.2, 1.4 * fs));
+                double sy = Math.Round(cy) + 0.5;
+                dc.DrawLine(strike, new Point(timeRect.Left - 2, sy), new Point(timeRect.Right + 2, sy));
+            }
 
             if (s.ShowDelta)
             {
@@ -232,7 +241,6 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
 
     private (string Text, string? Hex) Delta(LapRecord lap, uint pb, uint sb)
     {
-        if (!lap.Valid) return ("INVALID", null);
         if (pb == 0) return ("-", null);
         if (lap.TimeMs == sb) return ("SB", s.SessionBestColor);
         if (lap.TimeMs == pb) return ("PB", s.FasterColor);
@@ -413,5 +421,111 @@ public sealed class InputsView(TelemetryHub hub, InputsSettings s) : OverlayView
         }
         g.Freeze();
         return g;
+    }
+}
+
+/// <summary>Track limits counter: corner-cutting warnings vs. your limit, invalid laps, warnings and penalties.</summary>
+public sealed class TrackLimitsView(TelemetryHub hub, TrackLimitsSettings s) : OverlayView(hub, s)
+{
+    private int _seenWarnings = -1;
+    private double _flashAt = double.MinValue;
+
+    private double W => Math.Round(Math.Clamp(s.Width, 150, 360));
+    private double Fs => Math.Clamp(s.TextScale, 0.6, 1.8);
+    private double TitleH => Math.Round(24 * Fs);
+    private double MainH => Math.Round((s.ShowPips ? 70 : 58) * Fs);
+    private double StatH => Math.Round(24 * Fs);
+    private int StatCount => (s.ShowInvalidLaps ? 1 : 0) + (s.ShowTotalWarnings ? 1 : 0) + (s.ShowPenalties ? 1 : 0);
+
+    protected override Size ContentSize => new(W,
+        (s.ShowAccentStripe ? 3 : 0) + (s.ShowTitle ? TitleH : 0) + MainH + (StatCount > 0 ? StatCount * StatH + 6 : 0));
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        int warnings = 0, total = 0, penalties = 0, invalid = 0;
+        lock (Hub.Sync)
+        {
+            if (Hub.Lap is { } lap)
+            {
+                warnings = lap.CornerCuttingWarnings;
+                total = lap.TotalWarnings;
+                penalties = lap.Penalties;
+                if (lap.CurrentLapInvalid) invalid++;
+            }
+            foreach (var l in Hub.PlayerLaps) if (!l.Valid) invalid++;
+        }
+
+        if (warnings > _seenWarnings && _seenWarnings >= 0) _flashAt = Now;
+        _seenWarnings = warnings;
+
+        int limit = Math.Clamp(s.WarningLimit, 1, 10);
+        var (stateHex, stateText) =
+            warnings == 0 ? (s.OkColor, "CLEAN") :
+            warnings >= limit ? (s.DangerColor, "LIMIT REACHED") :
+            warnings == limit - 1 ? (s.DangerColor, "LAST WARNING") :
+            (s.WarnColor, "WARNING");
+
+        var size = ContentSize;
+        double w = W, fs = Fs, y = 0;
+        var text = Theme.Brush(s.TextColor);
+        var muted = Theme.Brush(s.TextColor, 0.6);
+        var state = Theme.Brush(stateHex);
+
+        BeginPanel(dc, size);
+
+        double t = Now - _flashAt;
+        if (s.FlashOnWarning && t < 1.5)
+            dc.DrawRectangle(Theme.Brush(stateHex, 0.4 * (1 - t / 1.5)), null, new Rect(size));
+
+        if (s.ShowAccentStripe)
+        {
+            dc.DrawRectangle(Theme.Brush(s.AccentColor), null, new Rect(0, 0, w, 3));
+            y += 3;
+        }
+        if (s.ShowTitle)
+        {
+            dc.DrawRectangle(Theme.Brush("#000000", 0.25), null, new Rect(0, y, w, TitleH));
+            DrawText(dc, s.TitleText ?? "", 11 * fs, text, 12, y + TitleH / 2, heavy: true);
+            y += TitleH;
+        }
+
+        // Big counter
+        double mainTop = y;
+        double numY = mainTop + (s.ShowPips ? MainH * 0.45 : MainH / 2);
+        var num = DrawText(dc, warnings.ToString(CultureInfo.InvariantCulture), 40 * fs, state, 12, numY, heavy: true);
+        DrawText(dc, $"/ {limit}", 16 * fs, muted, num.Right + 6, numY + 6 * fs, heavy: true);
+
+        DrawText(dc, stateText, 11 * fs, state, w - 12, numY - 8 * fs, TextAlignment.Right, heavy: true);
+        DrawText(dc, "warnings", 11 * fs, muted, w - 12, numY + 9 * fs, TextAlignment.Right);
+
+        if (s.ShowPips)
+        {
+            double pipY = mainTop + MainH * 0.84;
+            double gap = 5 * fs;
+            double pipW = Math.Min(28 * fs, (w - 24 - gap * (limit - 1)) / limit);
+            for (int i = 0; i < limit; i++)
+            {
+                var r = new Rect(12 + i * (pipW + gap), pipY - 3 * fs, pipW, 6 * fs);
+                dc.DrawRoundedRectangle(i < warnings ? state : Theme.Brush("#FFFFFF", 0.12), null, r, 3 * fs, 3 * fs);
+            }
+        }
+        y += MainH;
+
+        // Stats
+        if (StatCount > 0)
+        {
+            y += 3;
+            void Stat(string label, string value, Brush valueBrush)
+            {
+                DrawText(dc, label, 12 * fs, muted, 12, y + StatH / 2);
+                DrawText(dc, value, 12 * fs, valueBrush, w - 12, y + StatH / 2, TextAlignment.Right, heavy: true);
+                y += StatH;
+            }
+            if (s.ShowInvalidLaps) Stat("Invalid laps", invalid.ToString(CultureInfo.InvariantCulture), invalid > 0 ? Theme.Brush(s.WarnColor) : text);
+            if (s.ShowTotalWarnings) Stat("Total warnings", total.ToString(CultureInfo.InvariantCulture), total > 0 ? Theme.Brush(s.WarnColor) : text);
+            if (s.ShowPenalties) Stat("Penalties", penalties > 0 ? $"+{penalties}s" : "none", penalties > 0 ? Theme.Brush(s.DangerColor) : text);
+        }
+
+        EndPanel(dc, size);
     }
 }
