@@ -7,7 +7,7 @@ Two apps that share the same packet code:
 | `F126Overlay`   | **In-game overlays** (lap time log, gear/throttle/brake trace) with a control panel to switch them on and off |
 | `F126Telemetry` | Console dashboard plus lap CSV logging |
 
-Both listen on UDP **20999** (SimHub forwards there from 20777).
+Both listen on UDP **20999** by default (SimHub forwards there from 20777). In the overlay app you can change the port any time under **General → UDP port**.
 
 ## Install as a desktop app
 

@@ -22,7 +22,8 @@ public sealed class ControlWindow : Window
 
     private readonly TelemetryHub _hub;
     private readonly Settings _settings;
-    private readonly int _port;
+    private readonly UdpListener _listener;
+    private CancellationTokenSource? _demoCts;
     private readonly CancellationToken _ct;
     private readonly string? _startupError;
 
@@ -55,11 +56,11 @@ public sealed class ControlWindow : Window
     private bool _demoRunning;
     private bool _closing;
 
-    public ControlWindow(TelemetryHub hub, Settings settings, string? startupError, CancellationToken ct)
+    public ControlWindow(TelemetryHub hub, Settings settings, UdpListener listener, string? startupError, CancellationToken ct)
     {
         _hub = hub;
         _settings = settings;
-        _port = settings.Port;
+        _listener = listener;
         _ct = ct;
         _startupError = startupError;
 
@@ -553,8 +554,7 @@ public sealed class ControlWindow : Window
     {
         var page = new StackPanel();
 
-        if (_startupError != null)
-            page.Children.Add(Card("Connection problem", _startupError));
+        page.Children.Add(ConnectionCard());
 
         page.Children.Add(Card("Overlays", null,
             RowInline("Lock overlays", "Clicks go through to the game. Unlock to drag overlays (they get a dashed outline).",
@@ -575,10 +575,6 @@ public sealed class ControlWindow : Window
         page.Children.Add(Card("Data", null,
             RowInline("Save laps to CSV", "Applies after restarting the app", Switch(_settings.LogLaps, on => { _settings.LogLaps = on; RequestSave(); })),
             dataButtons));
-
-        page.Children.Add(Card("Connection",
-            $"Listening on UDP port {_port}. With SimHub, forward its F1 data to 127.0.0.1:{_port}. " +
-            "Play in Borderless or Windowed mode: Windows can't draw overlays over exclusive fullscreen."));
 
         var reset = new PillButton("Reset all settings");
         reset.Click += () =>
@@ -611,12 +607,88 @@ public sealed class ControlWindow : Window
         RequestSave();
     }
 
-    private void StartDemo()
+    private void StartDemo(bool toast = true)
     {
-        if (_demoRunning) return;
+        _demoCts?.Cancel();
         _demoRunning = true;
-        Task.Run(() => DemoSender.Run(_port, _ct));
-        ShowToast("Demo data running");
+        _demoCts = CancellationTokenSource.CreateLinkedTokenSource(_ct);
+        var token = _demoCts.Token;
+        int port = _listener.Port;
+        Task.Run(() => DemoSender.Run(port, token));
+        if (toast) ShowToast("Demo data running");
+    }
+
+    /// <summary>UDP port picker: quick presets, any custom port, applied instantly.</summary>
+    private Border ConnectionCard()
+    {
+        var status = new TextBlock { FontSize = 13, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0) };
+        void ShowStatus(string? error)
+        {
+            if (error != null)
+            {
+                status.Text = error;
+                status.Foreground = Theme.B("#FFFF6B5E");
+            }
+            else
+            {
+                status.Text = $"Listening on UDP {_listener.Port}.";
+                status.Foreground = Theme.B(Theme.Live);
+            }
+            Anim.EnterUp(status, 0, 6);
+        }
+
+        var box = Ui.TextField(_listener.Port > 0 ? _listener.Port.ToString() : _settings.Port.ToString(), 110);
+        box.FontFamily = new FontFamily("Cascadia Mono, Consolas");
+
+        void Apply(string text)
+        {
+            if (!int.TryParse(text.Trim(), out int port)) { ShowStatus("Type a number, for example 20777."); return; }
+            if (port == _listener.Port && _listener.IsListening) { ShowStatus(null); return; }
+
+            int old = _listener.Port;
+            var error = _listener.Start(port);
+            if (error != null)
+            {
+                ShowStatus(error + (old > 0 && _listener.IsListening ? $" Still listening on {old}." : ""));
+                return;
+            }
+            _settings.Port = port;
+            box.Text = port.ToString();
+            RequestSave();
+            if (_demoRunning) StartDemo(toast: false);
+            ShowStatus(null);
+            UpdateStatus();
+            ShowToast($"Now listening on UDP {port}");
+        }
+
+        var applyButton = new PillButton("Apply", primary: true) { Margin = new Thickness(8, 0, 0, 0) };
+        applyButton.Click += () => Apply(box.Text);
+        box.KeyDown += (_, e) => { if (e.Key == Key.Enter) Apply(box.Text); };
+
+        var custom = new StackPanel { Orientation = Orientation.Horizontal };
+        custom.Children.Add(box);
+        custom.Children.Add(applyButton);
+
+        var presets = new WrapPanel();
+        foreach (var (port, label) in new[] { (20777, "20777 · game default"), (20999, "20999 · via SimHub"), (20778, "20778"), (20888, "20888") })
+        {
+            var chip = new PillButton(label);
+            chip.Click += () => { box.Text = port.ToString(); Apply(port.ToString()); };
+            presets.Children.Add(chip);
+        }
+
+        var stack = new StackPanel();
+        stack.Children.Add(new TextBlock { Text = "Quick pick", FontSize = 14, FontWeight = FontWeights.SemiBold, Foreground = Theme.B(Theme.TextColor), Margin = new Thickness(0, 0, 0, 8) });
+        stack.Children.Add(presets);
+        stack.Children.Add(new TextBlock { Text = "Custom port", FontSize = 14, FontWeight = FontWeights.SemiBold, Foreground = Theme.B(Theme.TextColor), Margin = new Thickness(0, 6, 0, 8) });
+        stack.Children.Add(custom);
+        stack.Children.Add(status);
+        ShowStatus(_listener.IsListening ? null : _startupError);
+
+        return Card("UDP port",
+            "Must match where the data is sent: the game's UDP Port setting, or SimHub's forwarding target. " +
+            "Play in Borderless or Windowed mode so overlays can draw over the game.",
+            stack);
     }
 
     private Border TransparencyCard(OverlaySettings s, Action changed) =>
@@ -756,7 +828,8 @@ public sealed class ControlWindow : Window
             text = _hub.WrongFormat is ushort fmt ? $"Set UDP format to 2026 (got {fmt})" : live ? "Live" : "Waiting for data";
         }
         _liveText.Text = text;
-        _packetsText.Text = live ? $"{packets:N0} packets · UDP {_port}" : $"UDP {_port}";
+        string portText = _listener.IsListening ? $"UDP {_listener.Port}" : "Not listening";
+        _packetsText.Text = live ? $"{packets:N0} packets · {portText}" : portText;
 
         if (_wasLive == live) return;
         _wasLive = live;
