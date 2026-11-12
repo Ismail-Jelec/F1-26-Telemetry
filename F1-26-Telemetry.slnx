@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="F126Overlay/F126Overlay.csproj" />
+  <Project Path="F126Telemetry/F126Telemetry.csproj" />
+</Solution>

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>F126Overlay</RootNamespace>
+    <AssemblyName>F126Overlay</AssemblyName>
+    <StartupObject>F126Overlay.Program</StartupObject>
+  </PropertyGroup>
+
+  <!-- WPF projects leave System.IO out of the implicit usings; add it back -->
+  <ItemGroup>
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <!-- Shared packet decoding from the console app -->
+  <ItemGroup>
+    <Compile Include="..\F126Telemetry\Packets.cs" Link="Shared\Packets.cs" />
+    <Compile Include="..\F126Telemetry\Names.cs" Link="Shared\Names.cs" />
+    <Compile Include="..\F126Telemetry\TelemetryHub.cs" Link="Shared\TelemetryHub.cs" />
+    <Compile Include="..\F126Telemetry\LapLogger.cs" Link="Shared\LapLogger.cs" />
+    <Compile Include="..\F126Telemetry\DemoSender.cs" Link="Shared\DemoSender.cs" />
+  </ItemGroup>
+
+</Project>
