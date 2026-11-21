@@ -4,6 +4,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using Screen = System.Windows.Forms.Screen;
 
 namespace F126Overlay;
 
@@ -71,6 +72,31 @@ public sealed class OverlayWindow : Window
         var keepOnTop = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         keepOnTop.Tick += (_, _) => { if (IsVisible) { Topmost = false; Topmost = true; } };
         keepOnTop.Start();
+    }
+
+
+    /// <summary>Move the overlay to the selected monitor and remember its new position.</summary>
+    public void MoveToMonitor(Screen destination)
+    {
+        // WinForms works in screen pixels, while WPF uses device-independent positions.
+        var source = PresentationSource.FromVisual(this)?.CompositionTarget;
+        double sx = source?.TransformToDevice.M11 ?? 1.0;
+        double sy = source?.TransformToDevice.M22 ?? 1.0;
+        var center = new System.Drawing.Point(
+            (int)Math.Round((Left + Math.Max(ActualWidth, 1) / 2) * sx),
+            (int)Math.Round((Top + Math.Max(ActualHeight, 1) / 2) * sy));
+        var from = Screen.FromPoint(center).WorkingArea;
+        var to = destination.WorkingArea;
+        double width = Math.Max(ActualWidth, !double.IsNaN(Width) && Width > 0 ? Width : 0) * sx;
+        double height = Math.Max(ActualHeight, !double.IsNaN(Height) && Height > 0 ? Height : 0) * sy;
+        double rx = Math.Clamp((Left * sx - from.Left) / Math.Max(1, from.Width - width), 0, 1);
+        double ry = Math.Clamp((Top * sy - from.Top) / Math.Max(1, from.Height - height), 0, 1);
+        BeginAnimation(LeftProperty, null);
+        BeginAnimation(TopProperty, null);
+        Left = (to.Left + rx * Math.Max(0, to.Width - width)) / sx;
+        Top = (to.Top + ry * Math.Max(0, to.Height - height)) / sy;
+        _settings.Position = [Left, Top];
+        _save();
     }
 
     public OverlayView View => _view;

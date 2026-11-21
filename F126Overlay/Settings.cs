@@ -116,6 +116,8 @@ public sealed class Settings
 {
     public int Port { get; set; } = 20999;
     public bool Locked { get; set; }
+    // Windows monitor device name, for example \\.\DISPLAY2.
+    public string? MonitorDeviceName { get; set; }
     public bool LogLaps { get; set; } = true;
     public LapLogSettings LapLog { get; set; } = new();
     public InputsSettings Inputs { get; set; } = new();
