@@ -8,6 +8,7 @@ using System.Windows.Media.Effects;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using F126Telemetry;
+using Screen = System.Windows.Forms.Screen;
 
 namespace F126Overlay;
 
@@ -142,6 +143,12 @@ public sealed class ControlWindow : Window
             Anim.To(_root, OpacityProperty, 1, 280);
             Anim.To(_rootScale, ScaleTransform.ScaleXProperty, 1, 380, new BackEase { Amplitude = 0.3, EasingMode = EasingMode.EaseOut });
             Anim.To(_rootScale, ScaleTransform.ScaleYProperty, 1, 380, new BackEase { Amplitude = 0.3, EasingMode = EasingMode.EaseOut });
+
+            // Restore the chosen display, even if overlay coordinates were saved elsewhere.
+            var targetDisplay = Screen.AllScreens.FirstOrDefault(m => m.DeviceName == _settings.MonitorDeviceName);
+            if (targetDisplay != null)
+                foreach (var overlay in new[] { _lapLog, _inputs, _limits })
+                    if (!OverlayOnMonitor(overlay, targetDisplay)) overlay.MoveToMonitor(targetDisplay);
 
             if (_settings.LapLog.Enabled) _lapLog.FadeIn();
             if (_settings.Inputs.Enabled) _inputs.FadeIn();
@@ -619,6 +626,8 @@ public sealed class ControlWindow : Window
             RowInline("Lock overlays", "Clicks go through to the game. Unlock to drag overlays (they get a dashed outline).",
                 Switch(_settings.Locked, on => SetLocked(on)))));
 
+        page.Children.Add(MonitorCard());
+
         var dataButtons = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
         var folder = new PillButton("Open lap folder");
         folder.Click += () =>
@@ -656,6 +665,51 @@ public sealed class ControlWindow : Window
     }
 
     // ───────────────────────────── building blocks ─────────────────────────────
+
+
+    private Border MonitorCard()
+    {
+        var screens = Screen.AllScreens;
+        var selector = new ComboBox
+        {
+            MinWidth = 280, Height = 36, Margin = new Thickness(0, 10, 0, 8),
+            FontSize = 13, Padding = new Thickness(9, 5, 9, 5)
+        };
+        for (int i = 0; i < screens.Length; ++i)
+        {
+            var display = screens[i];
+            selector.Items.Add($"Monitor {i + 1} — {display.Bounds.Width} × {display.Bounds.Height}" +
+                (display.Primary ? " (primary)" : ""));
+        }
+        int selection = Array.FindIndex(screens, d => d.DeviceName == _settings.MonitorDeviceName);
+        selector.SelectedIndex = selection >= 0 ? selection : Array.FindIndex(screens, d => d.Primary);
+        selector.SelectionChanged += (_, _) =>
+        {
+            if (selector.SelectedIndex < 0 || selector.SelectedIndex >= screens.Length) return;
+            var chosen = screens[selector.SelectedIndex];
+            foreach (var overlay in new[] { _lapLog, _inputs, _limits })
+                overlay.MoveToMonitor(chosen);
+            _settings.MonitorDeviceName = chosen.DeviceName;
+            RequestSave();
+            ShowToast($"Overlays moved to monitor {selector.SelectedIndex + 1}");
+        };
+        var hint = new TextBlock
+        {
+            Text = "Moves all three overlays to this display. The choice is saved for next time. " +
+                   "Use the resolution to identify your cockpit monitor.",
+            Foreground = Theme.B(Theme.Muted), FontSize = 12, TextWrapping = TextWrapping.Wrap
+        };
+        return Card("Display / monitor", "Choose which screen shows your overlays.", selector, hint);
+    }
+
+    private static bool OverlayOnMonitor(OverlayWindow overlay, Screen target)
+    {
+        var dpi = VisualTreeHelper.GetDpi(overlay);
+        var center = new System.Drawing.Point(
+            (int)Math.Round((overlay.Left + Math.Max(overlay.ActualWidth, 1) / 2) * dpi.DpiScaleX),
+            (int)Math.Round((overlay.Top + Math.Max(overlay.ActualHeight, 1) / 2) * dpi.DpiScaleY));
+        return target.Bounds.Contains(center);
+    }
 
     private static string Pct(double v) => $"{v * 100:0}%";
     private static string Px(double v) => $"{v:0} px";
