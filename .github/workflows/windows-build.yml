@@ -1,0 +1,22 @@
+name: Windows build
+
+on:
+  push:
+    branches:
+      - feature/monitor-selector
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build F1 26 Overlay Studio
+        run: dotnet build F126Overlay/F126Overlay.csproj --configuration Release
+      - name: Build telemetry console
+        run: dotnet build F126Telemetry/F126Telemetry.csproj --configuration Release
