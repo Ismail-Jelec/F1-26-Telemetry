@@ -424,6 +424,7 @@ public sealed class ControlWindow : Window
                     RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
                 TransparencyCard(s, C),
                 FontCard(s, C),
+                StyleCard(s, C),
                 PositionCard(w),
             ]),
             ("Content", () =>
@@ -487,6 +488,7 @@ public sealed class ControlWindow : Window
                     RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
                 TransparencyCard(s, C),
                 FontCard(s, C),
+                StyleCard(s, C),
                 PositionCard(w),
             ]),
             ("Content", () =>
@@ -538,6 +540,7 @@ public sealed class ControlWindow : Window
                     RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
                 TransparencyCard(s, C),
                 FontCard(s, C),
+                StyleCard(s, C),
                 PositionCard(w),
             ]),
             ("Content", () =>
@@ -600,6 +603,7 @@ public sealed class ControlWindow : Window
                     RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
                 TransparencyCard(s, C),
                 FontCard(s, C),
+                StyleCard(s, C),
                 PositionCard(w),
             ]),
             ("Content", () =>
@@ -674,7 +678,7 @@ public sealed class ControlWindow : Window
             var dots = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
             foreach (var hex in new[] { theme.Accent, theme.Header, theme.Gear, theme.Throttle, theme.Brake })
                 dots.Children.Add(new Ellipse { Width = 10, Height = 10, Fill = Theme.B(hex), Margin = new Thickness(0, 0, 5, 0) });
-            dots.Children.Add(new TextBlock { Text = theme.Font, FontSize = 11, Foreground = Theme.B(Theme.Muted), Margin = new Thickness(4, -2, 0, 0) });
+            dots.Children.Add(new TextBlock { Text = theme.Font + (theme.Style == "Tiles" ? " · tiles" : ""), FontSize = 11, Foreground = Theme.B(Theme.Muted), Margin = new Thickness(4, -2, 0, 0) });
             sp.Children.Add(dots);
 
             var card = new Border
@@ -710,7 +714,13 @@ public sealed class ControlWindow : Window
             foreach (var o in AllOverlays) { o.Settings.AccentOpacity = v; o.ApplyAppearance(); }
             RequestSave();
         });
+        var allStyle = new ChoiceChips(StyleChoices, _settings.LapLog.Style);
+        allStyle.Changed += v => { foreach (var o in AllOverlays) { o.Settings.Style = v; o.ApplyAppearance(); } RequestSave(); };
+        var allNumbers = new ChoiceChips(NumberFontChoices, _settings.LapLog.NumberFont);
+        allNumbers.Changed += v => { foreach (var o in AllOverlays) { o.Settings.NumberFont = v; o.ApplyAppearance(); } RequestSave(); };
         page.Children.Add(Card("All overlays", "Changes every overlay at once (corner radius includes the boxes inside them). You can still fine-tune each overlay on its own page.",
+            RowStacked("Look", allStyle),
+            RowStacked("Number font", allNumbers),
             RowStacked("Corner radius", allRadius),
             RowStacked("Accent stripe opacity (the thin coloured line on top)", allAccent)));
 
@@ -1154,6 +1164,22 @@ public sealed class ControlWindow : Window
             RowStacked("Overall opacity", MakeSlider(0.2, 1.0, 0.05, s.Opacity, Pct, v => { s.Opacity = v; changed(); })),
             RowStacked("Background opacity", MakeSlider(0, 1.0, 0.05, s.BackgroundOpacity, Pct, v => { s.BackgroundOpacity = v; changed(); })));
 
+    private static readonly (string Value, string Label)[] StyleChoices = [("Flat", "Flat panel"), ("Tiles", "Dash tiles")];
+    private static readonly (string Value, string Label)[] NumberFontChoices =
+        [("", "Same as text"), (OverlayView.DigitalFont, "Digital (7-segment)"), ("Bahnschrift", "Bahnschrift"), ("Consolas", "Consolas")];
+
+    private static Border StyleCard(OverlaySettings s, Action changed)
+    {
+        var style = new ChoiceChips(StyleChoices, s.Style);
+        style.Changed += v => { s.Style = v; changed(); };
+        var numbers = new ChoiceChips(NumberFontChoices, s.NumberFont);
+        numbers.Changed += v => { s.NumberFont = v; changed(); };
+        return Card("Style", "Dash tiles splits the overlay into glowing coloured tiles, like a wheel dash display.",
+            RowStacked("Look", style),
+            RowStacked("Number font", numbers),
+            RowInline("Tile glow", "Soft glow around each tile (Dash tiles only)", Switch(s.Glow, on => { s.Glow = on; changed(); })));
+    }
+
     private static Border FontCard(OverlaySettings s, Action changed)
     {
         var chips = new ChoiceChips(FontChoices, s.FontFamily, previewFont: true);
@@ -1313,6 +1339,7 @@ public sealed class ControlWindow : Window
                     RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
                 TransparencyCard(s, C),
                 FontCard(s, C),
+                StyleCard(s, C),
                 PositionCard(w),
             ]),
             ("Content", () =>

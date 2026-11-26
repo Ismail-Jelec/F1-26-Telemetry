@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <Resource Include="app.ico" />
+    <Resource Include="Fonts\DSEG7Classic-Bold.ttf" />
   </ItemGroup>
 
   <!-- Shared packet decoding from the console app -->

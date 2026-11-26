@@ -34,6 +34,7 @@ The control panel (Overlay Studio) has four pages:
 - **Tyre strategy**: best tyre right now for the weather, wear per wheel and laps left at your pit-wear limit, the forecast with rain chances, and when to make your next stop and on which tyre (dry sets picked from your available sets; inters or wets if rain is coming)
 - **FPS counter**: the game's real frame rate, 1% low, frame time and a frame-time graph, measured with Intel PresentMon (downloaded and set up from the FPS page; needs a one-time Windows permission)
 - **Wheel buttons**: bind wheel buttons (via the game's UDP Action 1–12 bindings) to switch track limits ⇄ tyre strategy, or show/hide any overlay while driving
+- **Dash tiles style**: every overlay can switch from a flat panel to glowing coloured tiles with a digital 7-segment number font (bundled DSEG7, SIL Open Font License); the **Dash** theme sets it up in one click
 - **Themes**: one-click looks (Classic F1, Midnight, Neon, Stealth, Papaya, Racing Green)
 - **General**: lock overlays, lap CSV logging, demo data, reset
 

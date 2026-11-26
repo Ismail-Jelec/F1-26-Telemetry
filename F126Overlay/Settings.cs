@@ -12,6 +12,11 @@ public abstract class OverlaySettings
     public string BackgroundColor { get; set; } = "#141419";
     public double CornerRadius { get; set; } = 0;
     public double AccentOpacity { get; set; } = 1.0;
+    /// <summary>"Flat" (one panel) or "Tiles" (dash-style glowing tiles).</summary>
+    public string Style { get; set; } = "Flat";
+    /// <summary>Font for numbers; empty = same as the text font, "Digital" = 7-segment.</summary>
+    public string NumberFont { get; set; } = "";
+    public bool Glow { get; set; } = true;
     public string FontFamily { get; set; } = "Segoe UI";
     public double[]? Position { get; set; }
 }
@@ -255,7 +260,8 @@ public static class SettingsExtensions
 /// <summary>Ready-made colour themes applied to both overlays.</summary>
 public sealed record OverlayTheme(
     string Name, string Background, string Accent, string TitleBar, string Stripe, string PersonalBest,
-    string SessionBest, string Header, string Text, string Gear, string Throttle, string Brake, string Font, double Radius)
+    string SessionBest, string Header, string Text, string Gear, string Throttle, string Brake, string Font, double Radius,
+    string Style = "Flat", string NumberFont = "")
 {
     public static readonly OverlayTheme[] All =
     [
@@ -264,6 +270,7 @@ public sealed record OverlayTheme(
         new("Neon", "#0A0A12", "#FF3D9A", "#07070D", "#15152A", "#0A0A12", "#9B00B8", "#00D2BE", "#FFFFFF", "#00D2BE", "#39FF14", "#FF3D9A", "Bahnschrift", 6),
         new("Stealth", "#000000", "#FFFFFF", "#000000", "#111114", "#000000", "#6C5CE7", "#9A9AA4", "#FFFFFF", "#FFFFFF", "#D0D0D0", "#FF4A4A", "Bahnschrift", 0),
         new("Papaya", "#121212", "#FF8700", "#0A0A0A", "#1E1E1E", "#121212", "#9B00B8", "#FF8700", "#FFFFFF", "#FF8700", "#47C7FC", "#FF2E2E", "Bahnschrift", 4),
+        new("Dash", "#07080A", "#19E3B1", "#07080A", "#14161A", "#07080A", "#B400FF", "#19E3B1", "#EAF2F0", "#F2F2F2", "#2BD34F", "#FF3B3B", "Bahnschrift", 8, "Tiles", "Digital"),
         new("Racing Green", "#0B1A14", "#00A86B", "#06110D", "#12271E", "#0B1A14", "#9B00B8", "#C9A227", "#F2F2F2", "#C9A227", "#2BD34F", "#FF4A4A", "Segoe UI", 8),
     ];
 
@@ -274,6 +281,8 @@ public sealed record OverlayTheme(
             o.BackgroundColor = Background;
             o.FontFamily = Font;
             o.CornerRadius = Radius;
+            o.Style = Style;
+            o.NumberFont = NumberFont;
         }
         var l = s.LapLog;
         l.AccentColor = Accent; l.TitleBarColor = TitleBar; l.StripeColor = Stripe; l.PersonalBestColor = PersonalBest;

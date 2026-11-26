@@ -24,31 +24,76 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
     protected abstract Size ContentSize { get; }
     protected override Size MeasureOverride(Size availableSize) => ContentSize;
 
-    private (Typeface Regular, Typeface Heavy) Faces
+    /// <summary>Name used in settings for the bundled 7-segment font (DSEG7 Classic, SIL Open Font License).</summary>
+    public const string DigitalFont = "Digital";
+
+    private static (Typeface Regular, Typeface Heavy) FacesFor(string? name)
     {
-        get
+        name = string.IsNullOrWhiteSpace(name) ? "Segoe UI" : name;
+        if (!Fonts.TryGetValue(name, out var f))
         {
-            string name = string.IsNullOrWhiteSpace(_base.FontFamily) ? "Segoe UI" : _base.FontFamily;
-            if (!Fonts.TryGetValue(name, out var f))
-            {
-                var family = new FontFamily(name + ", Segoe UI");
-                f = (new Typeface(family, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal),
-                     new Typeface(family, FontStyles.Normal, FontWeights.Bold, FontStretches.Normal));
-                Fonts[name] = f;
-            }
-            return f;
+            var family = name == DigitalFont
+                ? new FontFamily(new Uri("pack://application:,,,/"), "./Fonts/#DSEG7 Classic, Segoe UI")
+                : new FontFamily(name + ", Segoe UI");
+            f = (new Typeface(family, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal),
+                 new Typeface(family, FontStyles.Normal, FontWeights.Bold, FontStretches.Normal));
+            Fonts[name] = f;
         }
+        return f;
     }
 
-    protected FormattedText Text(string s, double size, Brush brush, bool heavy = false) =>
-        new(s, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, heavy ? Faces.Heavy : Faces.Regular,
+    private (Typeface Regular, Typeface Heavy) Faces => FacesFor(_base.FontFamily);
+
+    /// <summary>Font for numbers: the number font if one is set, otherwise the normal font.</summary>
+    private (Typeface Regular, Typeface Heavy) NumberFaces =>
+        string.IsNullOrWhiteSpace(_base.NumberFont) ? Faces : FacesFor(_base.NumberFont);
+
+    private bool DigitalNumbers => _base.NumberFont == DigitalFont || (string.IsNullOrWhiteSpace(_base.NumberFont) && _base.FontFamily == DigitalFont);
+
+    protected FormattedText Text(string s, double size, Brush brush, bool heavy = false, bool numeric = false)
+    {
+        var faces = numeric ? NumberFaces : Faces;
+        // 7-segment digits are big for their point size; scale them down to sit with normal text.
+        if (numeric && DigitalNumbers) size *= 0.8;
+        return new(s, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, heavy ? faces.Heavy : faces.Regular,
             Math.Max(1, size), brush, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+    }
+
+    protected bool Tiles => _base.Style == "Tiles";
+
+    /// <summary>
+    /// Dash-style tile: dark glassy fill tinted with the colour, a coloured outline and an optional soft glow.
+    /// </summary>
+    protected void DrawTile(DrawingContext dc, Rect rect, string hex)
+    {
+        if (rect.Width <= 2 || rect.Height <= 2) return;
+        double r = Math.Clamp(Math.Max(_base.CornerRadius, 4), 0, Math.Min(rect.Width, rect.Height) / 2);
+        if (_base.Glow)
+        {
+            for (int k = 3; k >= 1; k--)
+            {
+                double g = k * 1.4;
+                var glowRect = new Rect(rect.X - g, rect.Y - g, rect.Width + g * 2, rect.Height + g * 2);
+                dc.DrawRoundedRectangle(null, new Pen(Theme.Brush(hex, 0.22 / k), 1.6), glowRect, r + g, r + g);
+            }
+        }
+        var c = Theme.Parse(hex, Colors.White);
+        var fill = new LinearGradientBrush(
+            Color.FromArgb(70, c.R, c.G, c.B), Color.FromArgb(22, c.R, c.G, c.B), 90);
+        fill.Freeze();
+        dc.DrawRoundedRectangle(Theme.Brush("#000000", 0.45), null, rect, r, r);
+        dc.DrawRoundedRectangle(fill, new Pen(Theme.Brush(hex, 0.9), 1.5), rect, r, r);
+    }
+
+    /// <summary>A section rectangle shrunk to leave a gap (and room for the glow) between tiles.</summary>
+    protected static Rect TileRect(double x, double y, double w, double h, double gap = 4) =>
+        new(x + gap, y + gap, Math.Max(0, w - gap * 2), Math.Max(0, h - gap * 2));
 
     /// <summary>Draws text with x as left, right or centre anchor and y as the vertical centre.</summary>
     protected Rect DrawText(DrawingContext dc, string s, double size, Brush brush, double x, double yCenter,
-        TextAlignment align = TextAlignment.Left, bool heavy = false)
+        TextAlignment align = TextAlignment.Left, bool heavy = false, bool numeric = false)
     {
-        var ft = Text(s, size, brush, heavy);
+        var ft = Text(s, size, brush, heavy, numeric);
         double left = align switch
         {
             TextAlignment.Right => x - ft.Width,
@@ -137,25 +182,28 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
         }
         if (s.ShowTitle)
         {
-            dc.DrawRectangle(Theme.Brush(s.TitleBarColor, Math.Min(1, bgAlpha + 0.05)), null, new Rect(0, y, w, TitleH));
+            if (Tiles) DrawTile(dc, TileRect(0, y, w, TitleH, 3), s.AccentColor);
+            else dc.DrawRectangle(Theme.Brush(s.TitleBarColor, Math.Min(1, bgAlpha + 0.05)), null, new Rect(0, y, w, TitleH));
             DrawText(dc, s.TitleText ?? "", 11 * fs, text, w / 2, y + TitleH / 2, TextAlignment.Center, heavy: true);
             y += TitleH;
         }
         if (s.ShowPersonalBest)
         {
-            DrawBestRow(dc, y, Theme.Brush(s.PersonalBestColor, bgAlpha), "PERSONAL\nSESSION BEST", pb, _pbFlashAt);
+            DrawBestRow(dc, y, Theme.Brush(s.PersonalBestColor, bgAlpha), s.FasterColor, "PERSONAL\nSESSION BEST", pb, _pbFlashAt);
             y += BestH;
         }
         if (s.ShowSessionBest)
         {
-            DrawBestRow(dc, y, Theme.Brush(s.SessionBestColor, Math.Max(0.35, bgAlpha)), "SESSION\nBEST", sb, _sbFlashAt);
+            DrawBestRow(dc, y, Theme.Brush(s.SessionBestColor, Math.Max(0.35, bgAlpha)), s.SessionBestColor, "SESSION\nBEST", sb, _sbFlashAt);
             y += BestH;
         }
 
         double timeX = Math.Round(w * 0.177), deltaX = Math.Round(w * 0.54);
+        if (Tiles)
+            DrawTile(dc, TileRect(0, y, w, (s.ShowColumnHeaders ? rowH : 0) + rows * rowH), s.HeaderColor);
         if (s.ShowColumnHeaders)
         {
-            dc.DrawRectangle(Theme.Brush(s.TitleBarColor, Math.Min(1, bgAlpha + 0.05)), null, new Rect(0, y, w, rowH));
+            if (!Tiles) dc.DrawRectangle(Theme.Brush(s.TitleBarColor, Math.Min(1, bgAlpha + 0.05)), null, new Rect(0, y, w, rowH));
             double cy = y + rowH / 2;
             DrawText(dc, "LAP", 11 * fs, header, 10, cy, heavy: true);
             DrawText(dc, "TIME", 11 * fs, header, timeX, cy, heavy: true);
@@ -200,7 +248,8 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
             }
         }
 
-        dc.PushClip(new RectangleGeometry(new Rect(0, y, w, rows * rowH)));
+        double rowX = Tiles ? 6 : 0, rowW = Tiles ? w - 12 : w;
+        dc.PushClip(new RectangleGeometry(new Rect(rowX, y, rowW, rows * rowH - (Tiles ? 5 : 0))));
         int topLap = newestFirst.Length > 0 ? newestFirst[0].Lap : 0;
         for (int i = 0; i < placed.Count; i++)
         {
@@ -210,15 +259,15 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
             // Stripes follow the lap number so they don't flicker while rows slide.
             int parity = lap != null ? lap.Lap : (s.NewestOnTop ? topLap - i : i);
             if (s.Stripes && (parity & 1) == 1)
-                dc.DrawRectangle(Theme.Brush(s.StripeColor, bgAlpha), null, new Rect(0, ry, w, rowH));
+                dc.DrawRectangle(Theme.Brush(s.StripeColor, Tiles ? bgAlpha * 0.6 : bgAlpha), null, new Rect(rowX, ry, rowW, rowH));
             if (lap == null) continue;
 
             if (newest && s.FlashNewLap && t < 1.6)
-                dc.DrawRectangle(Theme.Brush(_flashHex, 0.5 * (1 - t / 1.6)), null, new Rect(0, ry, w, rowH));
+                dc.DrawRectangle(Theme.Brush(_flashHex, 0.5 * (1 - t / 1.6)), null, new Rect(rowX, ry, rowW, rowH));
 
             double cy = ry + rowH / 2;
-            DrawText(dc, lap.Lap.ToString(CultureInfo.InvariantCulture), 12 * fs, text, 10, cy, heavy: true);
-            var timeRect = DrawText(dc, LapTime(lap.TimeMs), 12 * fs, lap.Valid ? text : grey, timeX, cy);
+            DrawText(dc, lap.Lap.ToString(CultureInfo.InvariantCulture), 12 * fs, text, 10, cy, heavy: true, numeric: true);
+            var timeRect = DrawText(dc, LapTime(lap.TimeMs), 12 * fs, lap.Valid ? text : grey, timeX, cy, numeric: true);
             if (!lap.Valid)
             {
                 // Strike through: the lap still shows its time and delta, but it didn't count.
@@ -231,11 +280,11 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
             {
                 var (delta, hex) = Delta(lap, pb, sb);
                 var brush = hex == null ? grey : Theme.Brush(hex);
-                if (s.ShowFuel) DrawText(dc, delta, 12 * fs, brush, deltaX, cy, heavy: true);
-                else DrawText(dc, delta, 12 * fs, brush, w - 10, cy, TextAlignment.Right, heavy: true);
+                if (s.ShowFuel) DrawText(dc, delta, 12 * fs, brush, deltaX, cy, heavy: true, numeric: true);
+                else DrawText(dc, delta, 12 * fs, brush, w - 10, cy, TextAlignment.Right, heavy: true, numeric: true);
             }
             if (s.ShowFuel)
-                DrawText(dc, lap.FuelKg.ToString("0.0", CultureInfo.InvariantCulture) + " kg", 12 * fs, text, w - 10, cy, TextAlignment.Right);
+                DrawText(dc, lap.FuelKg.ToString("0.0", CultureInfo.InvariantCulture) + " kg", 12 * fs, text, w - 10, cy, TextAlignment.Right, numeric: true);
         }
         dc.Pop();
 
@@ -265,19 +314,22 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
         if (sb != _seenSb) { if (sb != 0) _sbFlashAt = Now; _seenSb = sb; }
     }
 
-    private void DrawBestRow(DrawingContext dc, double y, Brush bg, string label, uint ms, double flashAt)
+    private void DrawBestRow(DrawingContext dc, double y, Brush bg, string tileHex, string label, uint ms, double flashAt)
     {
         double w = W, h = BestH, fs = Fs;
-        dc.DrawRectangle(bg, null, new Rect(0, y, w, h));
+        var area = Tiles ? TileRect(0, y, w, h) : new Rect(0, y, w, h);
+        if (Tiles) DrawTile(dc, area, tileHex);
+        else dc.DrawRectangle(bg, null, area);
         double t = Now - flashAt;
         if (s.GlowOnImprove && t < 1.2)
-            dc.DrawRectangle(Theme.Brush("#FFFFFF", 0.3 * (1 - t / 1.2)), null, new Rect(0, y, w, h));
+            dc.DrawRoundedRectangle(Theme.Brush(Tiles ? tileHex : "#FFFFFF", 0.3 * (1 - t / 1.2)), null, area, Tiles ? Math.Max(4, s.CornerRadius) : 0, Tiles ? Math.Max(4, s.CornerRadius) : 0);
 
         var ft = Text(label, 12 * fs, Theme.Brush(s.TextColor), heavy: true);
-        dc.DrawText(ft, new Point(10, Math.Round(y + h / 2 - ft.Height / 2)));
+        dc.DrawText(ft, new Point(Tiles ? 14 : 10, Math.Round(y + h / 2 - ft.Height / 2)));
         double boxX = Math.Round(w * 0.446);
-        dc.DrawRoundedRectangle(Theme.Brush("#000000", 0.3), null, new Rect(boxX, y + h * 0.17, w - boxX - 8, h * 0.66), InnerRadius, InnerRadius);
-        DrawText(dc, LapTime(ms), 21 * fs, Theme.Brush(s.TextColor), w - 14, y + h / 2, TextAlignment.Right, heavy: true);
+        if (!Tiles)
+            dc.DrawRoundedRectangle(Theme.Brush("#000000", 0.3), null, new Rect(boxX, y + h * 0.17, w - boxX - 8, h * 0.66), InnerRadius, InnerRadius);
+        DrawText(dc, LapTime(ms), 21 * fs, Theme.Brush(Tiles ? tileHex : s.TextColor), w - 14, y + h / 2, TextAlignment.Right, heavy: true, numeric: true);
     }
 }
 
@@ -327,17 +379,18 @@ public sealed class InputsView(TelemetryHub hub, InputsSettings s) : OverlayView
         // Gear + speed
         if (GearW > 0)
         {
-            double cx = GearW / 2 + 2;
+            if (Tiles) DrawTile(dc, TileRect(0, 0, GearW, h, 4), s.GearColor);
+            double cx = GearW / 2 + (Tiles ? 0 : 2);
             if (s.ShowGear)
             {
                 double gy = s.ShowSpeed ? h * 0.41 : h / 2;
-                DrawText(dc, Names.Gear(gear), h * 0.62, Theme.Brush(s.GearColor), cx, gy, TextAlignment.Center, heavy: true);
+                DrawText(dc, Names.Gear(gear), h * 0.62, Theme.Brush(s.GearColor), cx, gy, TextAlignment.Center, heavy: true, numeric: true);
             }
             if (s.ShowSpeed)
             {
                 double sy = s.ShowGear ? h * 0.83 : h / 2;
                 double sz = s.ShowGear ? h * 0.19 : h * 0.4;
-                DrawText(dc, speed.ToString(CultureInfo.InvariantCulture), sz, Theme.Brush(s.SpeedColor, 0.9), cx, sy, TextAlignment.Center, heavy: true);
+                DrawText(dc, speed.ToString(CultureInfo.InvariantCulture), sz, Theme.Brush(s.SpeedColor, 0.9), cx, sy, TextAlignment.Center, heavy: true, numeric: true);
             }
             x += GearW;
         }
@@ -347,8 +400,12 @@ public sealed class InputsView(TelemetryHub hub, InputsSettings s) : OverlayView
         {
             if (GearW == 0) x += Pad;
             var area = new Rect(x, Pad, TraceW, h - Pad * 2);
-            var frame = new Pen(Theme.Brush("#FFFFFF", 0.14), 1);
-            dc.DrawRoundedRectangle(Theme.Brush(s.TraceBackgroundColor, 0.35 * s.BackgroundOpacity + 0.1), frame, area, InnerRadius, InnerRadius);
+            if (Tiles) DrawTile(dc, area, s.SpeedColor);
+            else
+            {
+                var frame = new Pen(Theme.Brush("#FFFFFF", 0.14), 1);
+                dc.DrawRoundedRectangle(Theme.Brush(s.TraceBackgroundColor, 0.35 * s.BackgroundOpacity + 0.1), frame, area, InnerRadius, InnerRadius);
+            }
 
             if (s.GridLines)
             {
@@ -379,6 +436,7 @@ public sealed class InputsView(TelemetryHub hub, InputsSettings s) : OverlayView
         if (s.ShowBars)
         {
             double bx = x + Pad;
+            if (Tiles) DrawTile(dc, new Rect(bx - 4, 4, BarW * 2 + BarGap + 8, h - 8), s.SpeedColor);
             DrawBar(dc, bx, _thrSmooth, s.ThrottleColor);
             DrawBar(dc, bx + BarW + BarGap, _brkSmooth, s.BrakeColor);
         }
@@ -398,7 +456,7 @@ public sealed class InputsView(TelemetryHub hub, InputsSettings s) : OverlayView
         if (fill > 0.5) dc.DrawRoundedRectangle(Theme.Brush(hex), null, new Rect(x, frame.Bottom - fill, BarW, fill), Math.Min(InnerRadius, BarW / 2), Math.Min(InnerRadius, BarW / 2));
         if (s.ShowBarValues)
             DrawText(dc, ((int)Math.Round(value * 100)).ToString(CultureInfo.InvariantCulture), Math.Max(8, h * 0.14),
-                Theme.Brush("#FFFFFF"), x + BarW / 2, top / 2 + 1, TextAlignment.Center, heavy: true);
+                Theme.Brush("#FFFFFF"), x + BarW / 2, top / 2 + 1, TextAlignment.Center, heavy: true, numeric: true);
     }
 
     private static StreamGeometry Trace(float[] values, int offset, int count, int window, Rect area, bool closed)
@@ -491,16 +549,18 @@ public sealed class TrackLimitsView(TelemetryHub hub, TrackLimitsSettings s) : O
         }
         if (s.ShowTitle)
         {
-            dc.DrawRectangle(Theme.Brush("#000000", 0.25), null, new Rect(0, y, w, TitleH));
+            if (Tiles) DrawTile(dc, TileRect(0, y, w, TitleH, 3), s.AccentColor);
+            else dc.DrawRectangle(Theme.Brush("#000000", 0.25), null, new Rect(0, y, w, TitleH));
             DrawText(dc, s.TitleText ?? "", 11 * fs, text, 12, y + TitleH / 2, heavy: true);
             y += TitleH;
         }
 
         // Big counter
         double mainTop = y;
+        if (Tiles) DrawTile(dc, TileRect(0, mainTop, w, MainH), stateHex);
         double numY = mainTop + (s.ShowPips ? MainH * 0.45 : MainH / 2);
-        var num = DrawText(dc, warnings.ToString(CultureInfo.InvariantCulture), 40 * fs, state, 12, numY, heavy: true);
-        DrawText(dc, $"/ {next}", 16 * fs, muted, num.Right + 6, numY + 6 * fs, heavy: true);
+        var num = DrawText(dc, warnings.ToString(CultureInfo.InvariantCulture), 40 * fs, state, Tiles ? 14 : 12, numY, heavy: true, numeric: true);
+        DrawText(dc, $"/ {next}", 16 * fs, muted, num.Right + 6, numY + 6 * fs, heavy: true, numeric: true);
 
         DrawText(dc, stateText, 11 * fs, state, w - 12, numY - 8 * fs, TextAlignment.Right, heavy: true);
         DrawText(dc, $"{next - warnings} to next penalty", 11 * fs, muted, w - 12, numY + 9 * fs, TextAlignment.Right);
@@ -521,11 +581,12 @@ public sealed class TrackLimitsView(TelemetryHub hub, TrackLimitsSettings s) : O
         // Stats
         if (StatCount > 0)
         {
+            if (Tiles) DrawTile(dc, TileRect(0, y, w, StatCount * StatH + 6), s.TextColor);
             y += 3;
             void Stat(string label, string value, Brush valueBrush)
             {
                 DrawText(dc, label, 12 * fs, muted, 12, y + StatH / 2);
-                DrawText(dc, value, 12 * fs, valueBrush, w - 12, y + StatH / 2, TextAlignment.Right, heavy: true);
+                DrawText(dc, value, 12 * fs, valueBrush, w - 12, y + StatH / 2, TextAlignment.Right, heavy: true, numeric: true);
                 y += StatH;
             }
             if (s.ShowInvalidLaps) Stat("Invalid laps", invalid.ToString(CultureInfo.InvariantCulture), invalid > 0 ? Theme.Brush(s.WarnColor) : text);
@@ -567,18 +628,21 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
         if (s.ShowAccentStripe) { dc.DrawRectangle(Theme.Brush(s.AccentColor, s.AccentOpacity), null, new Rect(0, 0, w, 3)); y += 3; }
         if (s.ShowTitle)
         {
-            dc.DrawRectangle(Theme.Brush("#000000", 0.25), null, new Rect(0, y, w, H(24)));
+            if (Tiles) DrawTile(dc, TileRect(0, y, w, H(24), 3), s.AccentColor);
+            else dc.DrawRectangle(Theme.Brush("#000000", 0.25), null, new Rect(0, y, w, H(24)));
             DrawText(dc, s.TitleText ?? "", 11 * fs, text, 12, y + H(24) / 2, heavy: true);
             if (!a.HasData) DrawText(dc, "waiting for data", 10 * fs, muted, w - 12, y + H(24) / 2, TextAlignment.Right);
             y += H(24);
         }
 
-        void Divider() => dc.DrawRectangle(line, null, new Rect(10, y, w - 20, 1));
+        void Divider() { if (!Tiles) dc.DrawRectangle(line, null, new Rect(10, y, w - 20, 1)); }
+        string WearHex(double v) => v >= s.PitWearThreshold ? s.SoftColor : v >= s.PitWearThreshold * 0.75 ? s.MediumColor : s.InterColor;
 
         // Current tyre
         if (s.ShowCurrent)
         {
             double h = H(60), cy = y + h / 2;
+            if (Tiles) DrawTile(dc, TileRect(0, y, w, h), CompoundHex(a.FittedVisual));
             DrawChip(dc, 12 + 18 * fs, cy, 18 * fs, a.FittedVisual);
             double tx = 12 + 44 * fs;
             DrawText(dc, CompoundName(a.FittedVisual), 14 * fs, text, tx, cy - 9 * fs, heavy: true);
@@ -586,7 +650,7 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
 
             string left = a.LapsLeftOnTyre is double l ? (l >= 99 ? "99+" : $"{l:0}") : "–";
             var wearHex = a.MaxWear >= s.PitWearThreshold ? s.SoftColor : a.MaxWear >= s.PitWearThreshold * 0.75 ? s.MediumColor : s.InterColor;
-            DrawText(dc, left, 24 * fs, Theme.Brush(wearHex), w - 12, cy - 6 * fs, TextAlignment.Right, heavy: true);
+            DrawText(dc, left, 24 * fs, Theme.Brush(wearHex), w - 12, cy - 6 * fs, TextAlignment.Right, heavy: true, numeric: true);
             DrawText(dc, "laps left", 10 * fs, muted, w - 12, cy + 14 * fs, TextAlignment.Right);
             y += h;
         }
@@ -596,6 +660,7 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
         {
             double h = H(40);
             Divider();
+            if (Tiles) DrawTile(dc, TileRect(0, y, w, h, 3), WearHex(a.MaxWear));
             string[] labels = ["FL", "FR", "RL", "RR"];
             int[] idx = [2, 3, 0, 1]; // wear array is RL, RR, FL, FR
             double cellW = (w - 24) / 4;
@@ -604,7 +669,7 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
                 float v = a.Wear[idx[i]];
                 double x = 12 + i * cellW;
                 DrawText(dc, labels[i], 9 * fs, muted, x, y + h * 0.3);
-                DrawText(dc, $"{v:0}%", 12 * fs, text, x + cellW - 6, y + h * 0.3, TextAlignment.Right, heavy: true);
+                DrawText(dc, $"{v:0}%", 12 * fs, text, x + cellW - 6, y + h * 0.3, TextAlignment.Right, heavy: true, numeric: true);
                 var bar = new Rect(x, y + h * 0.62, cellW - 6, 4 * fs);
                 dc.DrawRoundedRectangle(Theme.Brush("#FFFFFF", 0.1), null, bar, Math.Min(InnerRadius, bar.Height / 2), Math.Min(InnerRadius, bar.Height / 2));
                 double fill = bar.Width * Math.Clamp(v / 100.0, 0, 1);
@@ -612,6 +677,13 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
                 if (fill > 0.5) dc.DrawRoundedRectangle(Theme.Brush(hex), null, new Rect(bar.X, bar.Y, fill, bar.Height), Math.Min(InnerRadius, bar.Height / 2), Math.Min(InnerRadius, bar.Height / 2));
             }
             y += h;
+        }
+
+        // One tile around weather + forecast, coloured by the conditions now.
+        if (Tiles && (s.ShowWeather || s.ShowForecast))
+        {
+            var nowHex = a.ConditionsNow == Conditions.Dry ? s.TextColor : a.ConditionsNow == Conditions.Inter ? s.InterColor : s.WetColor;
+            DrawTile(dc, TileRect(0, y, w, (s.ShowWeather ? H(30) : 0) + (s.ShowForecast ? H(44) : 0), 3), nowHex);
         }
 
         // Weather now
@@ -654,10 +726,13 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
         {
             double h = H(58), cy = y + h / 2;
             Divider();
+            if (Tiles) DrawTile(dc, TileRect(0, y, w, h, 3), a.ChangeNow && a.HasData ? s.AlertColor : CompoundHex(a.OptimalNowVisual));
             if (a.ChangeNow && a.HasData)
             {
                 double alpha = s.PulseOnChange ? 0.18 + 0.14 * Math.Sin(Now * 5) : 0.25;
-                dc.DrawRectangle(Theme.Brush(s.AlertColor, alpha), null, new Rect(0, y + 1, w, h - 1));
+                var pulse = Tiles ? TileRect(0, y, w, h, 3) : new Rect(0, y + 1, w, h - 1);
+                double pr = Tiles ? Math.Max(4, s.CornerRadius) : 0;
+                dc.DrawRoundedRectangle(Theme.Brush(s.AlertColor, alpha), null, pulse, pr, pr);
             }
             DrawText(dc, "OPTIMAL NOW", 9 * fs, a.ChangeNow ? Theme.Brush(s.AlertColor) : muted, 12, y + H(12), heavy: true);
             DrawChip(dc, 12 + 13 * fs, cy + 6 * fs, 13 * fs, a.OptimalNowVisual);
@@ -732,7 +807,7 @@ public sealed class FpsView(TelemetryHub hub, FpsSettings s, FpsMonitor monitor)
     }
 
     // Widths of each part, so the panel can shrink to what's switched on.
-    private double NumberW => Text("000", 30 * Fs, Brushes.White, heavy: true).Width + (s.ShowLabel ? Text("FPS", 11 * Fs, Brushes.White, heavy: true).Width + 5 : 0);
+    private double NumberW => Text("000", 30 * Fs, Brushes.White, heavy: true, numeric: true).Width + (s.ShowLabel ? Text("FPS", 11 * Fs, Brushes.White, heavy: true).Width + 5 : 0);
     private double RightW
     {
         get
@@ -740,8 +815,8 @@ public sealed class FpsView(TelemetryHub hub, FpsSettings s, FpsMonitor monitor)
             double w = 0;
             if (_stats != null)
             {
-                if (s.ShowLow) w = Math.Max(w, Text("1% 000", 11 * Fs, Brushes.White, heavy: true).Width);
-                if (s.ShowFrameTime) w = Math.Max(w, Text("00.0 ms", 11 * Fs, Brushes.White).Width);
+                if (s.ShowLow) w = Math.Max(w, Text("1% 000", 11 * Fs, Brushes.White, heavy: true, numeric: true).Width);
+                if (s.ShowFrameTime) w = Math.Max(w, Text("00.0 ms", 11 * Fs, Brushes.White, numeric: true).Width);
             }
             else if (s.ShowStatus) w = Text(_status, 10 * Fs, Brushes.White).Width;
             return w;
@@ -790,6 +865,13 @@ public sealed class FpsView(TelemetryHub hub, FpsSettings s, FpsMonitor monitor)
         BeginPanel(dc, size);
         if (s.ShowAccentStripe) { dc.DrawRectangle(Theme.Brush(s.AccentColor, s.AccentOpacity), null, new Rect(0, 0, w, 3)); y += 3; }
 
+        if (Tiles)
+        {
+            double fpsNow = _stats?.Fps ?? 0;
+            string tileHex = _stats == null ? s.TextColor : fpsNow >= s.GoodFps ? s.GoodColor : fpsNow >= s.OkFps ? s.OkColor : s.BadColor;
+            DrawTile(dc, TileRect(0, y, w, size.Height - y, 3), tileHex);
+        }
+
         if (HasMain)
         {
             double cy = y + MainH / 2;
@@ -800,7 +882,7 @@ public sealed class FpsView(TelemetryHub hub, FpsSettings s, FpsMonitor monitor)
                 if (s.ShowNumber)
                 {
                     string hex = _shownFps >= s.GoodFps ? s.GoodColor : _shownFps >= s.OkFps ? s.OkColor : s.BadColor;
-                    var num = DrawText(dc, Math.Round(_shownFps).ToString(CultureInfo.InvariantCulture), 30 * fs, Theme.Brush(hex), Pad, cy, heavy: true);
+                    var num = DrawText(dc, Math.Round(_shownFps).ToString(CultureInfo.InvariantCulture), 30 * fs, Theme.Brush(hex), Pad, cy, heavy: true, numeric: true);
                     if (s.ShowLabel) DrawText(dc, "FPS", 11 * fs, muted, num.Right + 5, cy + 6 * fs, heavy: true);
                 }
 
@@ -810,11 +892,11 @@ public sealed class FpsView(TelemetryHub hub, FpsSettings s, FpsMonitor monitor)
                 if (s.ShowLow)
                 {
                     string lowHex = st.Low1 >= s.GoodFps ? s.GoodColor : st.Low1 >= s.OkFps ? s.OkColor : s.BadColor;
-                    DrawText(dc, $"1% {Math.Round(st.Low1)}", 11 * fs, Theme.Brush(lowHex), rx, ry, align, heavy: true);
+                    DrawText(dc, $"1% {Math.Round(st.Low1)}", 11 * fs, Theme.Brush(lowHex), rx, ry, align, heavy: true, numeric: true);
                     ry += 16 * fs;
                 }
                 if (s.ShowFrameTime)
-                    DrawText(dc, $"{st.FrameMs:0.0} ms", 11 * fs, muted, rx, ry, align);
+                    DrawText(dc, $"{st.FrameMs:0.0} ms", 11 * fs, muted, rx, ry, align, numeric: true);
             }
             else
             {
@@ -833,7 +915,7 @@ public sealed class FpsView(TelemetryHub hub, FpsSettings s, FpsMonitor monitor)
         if (s.ShowGraph)
         {
             var area = new Rect(Pad, y + (HasMain ? 0 : 6), w - Pad * 2, GraphH - (HasMain ? 8 : 12));
-            dc.DrawRoundedRectangle(Theme.Brush("#000000", 0.3), null, area, InnerRadius, InnerRadius);
+            dc.DrawRoundedRectangle(Theme.Brush("#000000", Tiles ? 0.2 : 0.3), null, area, InnerRadius, InnerRadius);
             if (_stats is { } g && g.Recent.Length > 1)
             {
                 // Scale so the "OK" frame time sits at mid height; spikes go to the top.
