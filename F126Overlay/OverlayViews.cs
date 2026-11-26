@@ -700,3 +700,107 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
         DrawText(dc, Letter(visual), r * 0.95, colour, cx, cy, TextAlignment.Center, heavy: true);
     }
 }
+
+/// <summary>FPS counter: frame rate of the game (via PresentMon), 1% low, frame time and a frame-time graph.</summary>
+public sealed class FpsView(TelemetryHub hub, FpsSettings s, FpsMonitor monitor) : OverlayView(hub, s)
+{
+    private string? _app;
+    private double _appCheckedAt = double.MinValue;
+    private double _shownFps;
+
+    private double W => Math.Round(Math.Clamp(s.Width, 120, 320));
+    private double Fs => Math.Clamp(s.TextScale, 0.6, 2.0);
+    private double MainH => Math.Round(54 * Fs);
+    private double GraphH => s.ShowGraph ? Math.Round(30 * Fs) : 0;
+
+    protected override Size ContentSize => new(W, (s.ShowAccentStripe ? 3 : 0) + MainH + GraphH);
+
+    /// <summary>The app being measured: the one you chose, else the focused window (checked twice a second).</summary>
+    private string? TargetApp()
+    {
+        if (!string.IsNullOrWhiteSpace(s.TargetApp)) return s.TargetApp.Trim();
+        if (Now - _appCheckedAt < 0.5) return _app;
+        _appCheckedAt = Now;
+        var fg = FpsMonitor.ForegroundExe();
+        // Ignore our own windows and the desktop so the reading stays on the game when you alt-tab to the panel.
+        if (fg != null && !fg.StartsWith("F126", StringComparison.OrdinalIgnoreCase) && !fg.Equals("explorer.exe", StringComparison.OrdinalIgnoreCase))
+            _app = fg;
+        return _app;
+    }
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        var size = ContentSize;
+        double w = W, fs = Fs, y = 0;
+        var text = Theme.Brush(s.TextColor);
+        var muted = Theme.Brush(s.TextColor, 0.6);
+
+        string? app = TargetApp();
+        var stats = app != null ? monitor.Stats(app) : null;
+        string status =
+            !FpsMonitor.IsDownloaded || !FpsMonitor.HasPermission ? "setup needed" :
+            !monitor.IsRunning ? "not running" :
+            stats == null ? "waiting for game" : "";
+
+        BeginPanel(dc, size);
+        if (s.ShowAccentStripe) { dc.DrawRectangle(Theme.Brush(s.AccentColor), null, new Rect(0, 0, w, 3)); y += 3; }
+
+        double cy = y + MainH / 2;
+        if (stats is { } st)
+        {
+            // Ease the number a little so it's readable instead of flickering every frame.
+            _shownFps = _shownFps <= 0 ? st.Fps : _shownFps + (st.Fps - _shownFps) * 0.15;
+            string hex = _shownFps >= s.GoodFps ? s.GoodColor : _shownFps >= s.OkFps ? s.OkColor : s.BadColor;
+            var num = DrawText(dc, Math.Round(_shownFps).ToString(CultureInfo.InvariantCulture), 30 * fs, Theme.Brush(hex), 12, cy, heavy: true);
+            if (s.ShowLabel) DrawText(dc, "FPS", 11 * fs, muted, num.Right + 5, cy + 6 * fs, heavy: true);
+
+            double ry = s.ShowLow && s.ShowFrameTime ? cy - 8 * fs : cy;
+            if (s.ShowLow)
+            {
+                string lowHex = st.Low1 >= s.GoodFps ? s.GoodColor : st.Low1 >= s.OkFps ? s.OkColor : s.BadColor;
+                DrawText(dc, $"1% {Math.Round(st.Low1)}", 11 * fs, Theme.Brush(lowHex), w - 10, ry, TextAlignment.Right, heavy: true);
+                ry += 16 * fs;
+            }
+            if (s.ShowFrameTime)
+                DrawText(dc, $"{st.FrameMs:0.0} ms", 11 * fs, muted, w - 10, ry, TextAlignment.Right);
+        }
+        else
+        {
+            _shownFps = 0;
+            var num = DrawText(dc, "–", 30 * fs, muted, 12, cy, heavy: true);
+            if (s.ShowLabel) DrawText(dc, "FPS", 11 * fs, muted, num.Right + 5, cy + 6 * fs, heavy: true);
+            DrawText(dc, status, 10 * fs, muted, w - 10, cy, TextAlignment.Right);
+        }
+        y += MainH;
+
+        if (s.ShowGraph)
+        {
+            var area = new Rect(10, y, w - 20, GraphH - 8);
+            dc.DrawRoundedRectangle(Theme.Brush("#000000", 0.3), null, area, InnerRadius, InnerRadius);
+            if (stats is { } g && g.Recent.Length > 1)
+            {
+                // Scale so the "OK" frame time sits at mid height; spikes go to the top.
+                double maxMs = 2000.0 / Math.Max(1, s.OkFps);
+                var geo = new StreamGeometry();
+                using (var ctx = geo.Open())
+                {
+                    double step = area.Width / (g.Recent.Length - 1);
+                    for (int i = 0; i < g.Recent.Length; i++)
+                    {
+                        double v = Math.Clamp(g.Recent[i] / maxMs, 0, 1);
+                        var p = new Point(area.Left + i * step, area.Bottom - 2 - v * (area.Height - 4));
+                        if (i == 0) ctx.BeginFigure(p, false, false); else ctx.LineTo(p, true, true);
+                    }
+                }
+                geo.Freeze();
+                dc.PushClip(new RectangleGeometry(area, InnerRadius, InnerRadius));
+                double midY = Math.Round(area.Top + area.Height / 2) + 0.5;
+                dc.DrawLine(new Pen(Theme.Brush("#FFFFFF", 0.1), 1), new Point(area.Left, midY), new Point(area.Right, midY));
+                dc.DrawGeometry(null, new Pen(Theme.Brush(s.GoodColor), 1.4 * fs) { LineJoin = PenLineJoin.Round }, geo);
+                dc.Pop();
+            }
+        }
+
+        EndPanel(dc, size);
+    }
+}

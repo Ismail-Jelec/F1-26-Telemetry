@@ -147,6 +147,35 @@ public sealed class TyreStrategySettings : OverlaySettings
     public bool PulseOnChange { get; set; } = true;
 }
 
+public sealed class FpsSettings : OverlaySettings
+{
+    public FpsSettings() { CornerRadius = 8; Enabled = false; }
+
+    // Layout
+    public double Width { get; set; } = 190;
+    public double TextScale { get; set; } = 1.0;
+
+    // Source
+    /// <summary>Process to measure, e.g. "F1_25.exe". Empty = whatever window has focus.</summary>
+    public string TargetApp { get; set; } = "";
+    public double GoodFps { get; set; } = 120;
+    public double OkFps { get; set; } = 60;
+
+    // Content
+    public bool ShowAccentStripe { get; set; } = true;
+    public bool ShowLabel { get; set; } = true;
+    public bool ShowLow { get; set; } = true;
+    public bool ShowFrameTime { get; set; } = true;
+    public bool ShowGraph { get; set; } = true;
+
+    // Colours
+    public string AccentColor { get; set; } = "#E10600";
+    public string TextColor { get; set; } = "#FFFFFF";
+    public string GoodColor { get; set; } = "#2BD34F";
+    public string OkColor { get; set; } = "#FFD400";
+    public string BadColor { get; set; } = "#FF2E2E";
+}
+
 /// <summary>User settings, saved as JSON in %AppData%\F126Overlay\settings.json.</summary>
 public sealed class Settings
 {
@@ -159,6 +188,7 @@ public sealed class Settings
     public InputsSettings Inputs { get; set; } = new();
     public TrackLimitsSettings TrackLimits { get; set; } = new();
     public TyreStrategySettings Tyres { get; set; } = new();
+    public FpsSettings Fps { get; set; } = new();
 
     /// <summary>Wheel/controller button flag per action key (0 = not bound). Default: UDP Action 1 switches limits/tyres.</summary>
     public Dictionary<string, uint> WheelButtons { get; set; } = new() { ["swap"] = 0x00100000 };
@@ -178,6 +208,7 @@ public sealed class Settings
                 s.Inputs ??= new();
                 s.TrackLimits ??= new();
                 s.Tyres ??= new();
+                s.Fps ??= new();
                 s.WheelButtons ??= new();
                 return s;
             }
@@ -228,7 +259,7 @@ public sealed record OverlayTheme(
 
     public void ApplyTo(Settings s)
     {
-        foreach (OverlaySettings o in new OverlaySettings[] { s.LapLog, s.Inputs, s.TrackLimits, s.Tyres })
+        foreach (OverlaySettings o in new OverlaySettings[] { s.LapLog, s.Inputs, s.TrackLimits, s.Tyres, s.Fps })
         {
             o.BackgroundColor = Background;
             o.FontFamily = Font;
@@ -242,5 +273,6 @@ public sealed record OverlayTheme(
         var t = s.TrackLimits;
         t.AccentColor = Accent; t.TextColor = Text; t.OkColor = Throttle; t.DangerColor = Brake;
         s.Tyres.AccentColor = Accent; s.Tyres.TextColor = Text;
+        s.Fps.AccentColor = Accent; s.Fps.TextColor = Text; s.Fps.GoodColor = Throttle; s.Fps.BadColor = Brake;
     }
 }

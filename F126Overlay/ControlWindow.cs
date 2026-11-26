@@ -32,6 +32,9 @@ public sealed class ControlWindow : Window
     private readonly OverlayWindow _inputs;
     private readonly OverlayWindow _limits;
     private readonly OverlayWindow _tyres;
+    private readonly OverlayWindow _fps;
+    private readonly FpsMonitor _fpsMonitor = new();
+    private double _fpsRetryAt;
 
     private readonly Border _root;
     private readonly ScaleTransform _rootScale = new(0.96, 0.96);
@@ -41,7 +44,7 @@ public sealed class ControlWindow : Window
     private readonly TextBlock _pageSubtitle = new();
     private readonly List<(NavItem Item, Func<UIElement> Build, string Title, string Subtitle)> _pages = [];
     private int _currentPage;
-    private readonly Dictionary<string, int> _subTab = new() { ["laplog"] = 0, ["inputs"] = 0, ["limits"] = 0, ["tyres"] = 0 };
+    private readonly Dictionary<string, int> _subTab = new() { ["laplog"] = 0, ["inputs"] = 0, ["limits"] = 0, ["tyres"] = 0, ["fps"] = 0 };
     private readonly List<OverlayView> _previews = [];
 
     private readonly Ellipse _liveDot = new() { Width = 8, Height = 8 };
@@ -90,6 +93,8 @@ public sealed class ControlWindow : Window
             new Point(area.Left + 40, area.Top + 120), RequestSave);
         _tyres = new OverlayWindow("Tyre strategy", new TyreStrategyView(hub, settings.Tyres), settings.Tyres,
             new Point(area.Right - 330, area.Bottom - 520), RequestSave);
+        _fps = new OverlayWindow("FPS", new FpsView(hub, settings.Fps, _fpsMonitor), settings.Fps,
+            new Point(area.Left + 40, area.Top + 40), RequestSave);
 
         // Window shell
         _root = new Border
@@ -138,6 +143,7 @@ public sealed class ControlWindow : Window
         _pages.Add((null!, BuildInputsPage, "Inputs", "Gear, speed and a live throttle / brake trace"));
         _pages.Add((null!, BuildTrackLimitsPage, "Track limits", "Corner-cutting warnings, invalid laps and penalties"));
         _pages.Add((null!, BuildTyresPage, "Tyre strategy", "Best tyre for the weather, wear and laps left"));
+        _pages.Add((null!, BuildFpsPage, "FPS counter", "Your game's real frame rate, measured with Intel PresentMon"));
         _pages.Add((null!, BuildWheelPage, "Wheel buttons", "Toggle overlays from your wheel while you drive"));
         _pages.Add((null!, BuildThemesPage, "Themes", "One-click looks and rounded corners for all overlays"));
         _pages.Add((null!, BuildGeneralPage, "General", "Locking, lap logging, demo data and reset"));
@@ -152,7 +158,7 @@ public sealed class ControlWindow : Window
             // Restore the chosen display, even if overlay coordinates were saved elsewhere.
             var targetDisplay = Screen.AllScreens.FirstOrDefault(m => m.DeviceName == _settings.MonitorDeviceName);
             if (targetDisplay != null)
-                foreach (var overlay in new[] { _lapLog, _inputs, _limits, _tyres })
+                foreach (var overlay in new[] { _lapLog, _inputs, _limits, _tyres, _fps })
                     if (!OverlayOnMonitor(overlay, targetDisplay)) overlay.MoveToMonitor(targetDisplay);
 
             PlaceNewOverlaysOnGameScreen();
@@ -161,10 +167,12 @@ public sealed class ControlWindow : Window
             if (_settings.Inputs.Enabled) _inputs.FadeIn();
             if (_settings.TrackLimits.Enabled) _limits.FadeIn();
             if (_settings.Tyres.Enabled) _tyres.FadeIn();
+            if (_settings.Fps.Enabled) _fps.FadeIn();
             _lapLog.SetLocked(_settings.Locked);
             _inputs.SetLocked(_settings.Locked);
             _limits.SetLocked(_settings.Locked);
             _tyres.SetLocked(_settings.Locked);
+            _fps.SetLocked(_settings.Locked);
             SelectPage(0);
         };
         Closing += OnClosing;
@@ -229,7 +237,7 @@ public sealed class ControlWindow : Window
 
     private void BuildNav()
     {
-        string[] icons = ["\uE823", "\uE7FC", "\uE7BA", "\uE9CA", "\uE765", "\uE790", "\uE713"];
+        string[] icons = ["\uE823", "\uE7FC", "\uE7BA", "\uE9CA", "\uEC4A", "\uE765", "\uE790", "\uE713"];
         for (int i = 0; i < _pages.Count; i++)
         {
             int index = i;
@@ -681,6 +689,7 @@ public sealed class ControlWindow : Window
                 _inputs.ApplyAppearance();
                 _limits.ApplyAppearance();
                 _tyres.ApplyAppearance();
+                _fps.ApplyAppearance();
                 RequestSave();
                 ShowToast($"{theme.Name} applied");
                 SelectPage(_currentPage, animateTitle: false); // keep the corner slider in sync
@@ -731,18 +740,20 @@ public sealed class ControlWindow : Window
         var reset = new PillButton("Reset all settings");
         reset.Click += () =>
         {
-            bool lapOn = _settings.LapLog.Enabled, inOn = _settings.Inputs.Enabled, limOn = _settings.TrackLimits.Enabled, tyOn = _settings.Tyres.Enabled;
+            bool lapOn = _settings.LapLog.Enabled, inOn = _settings.Inputs.Enabled, limOn = _settings.TrackLimits.Enabled, tyOn = _settings.Tyres.Enabled, fpsOn = _settings.Fps.Enabled;
             _settings.LapLog.ResetToDefaults();
             _settings.Inputs.ResetToDefaults();
             _settings.TrackLimits.ResetToDefaults();
             _settings.Tyres.ResetToDefaults();
-            _lapLog.ApplyAppearance(); _inputs.ApplyAppearance(); _limits.ApplyAppearance(); _tyres.ApplyAppearance();
+            _settings.Fps.ResetToDefaults();
+            _settings.Fps.Enabled = fpsOn; // keep the FPS counter as it was (it needs a one-time setup)
+            _lapLog.ApplyAppearance(); _inputs.ApplyAppearance(); _limits.ApplyAppearance(); _tyres.ApplyAppearance(); _fps.ApplyAppearance();
             foreach (var o in AllOverlays) ResetOnGameScreen(o);
             if (!lapOn) _lapLog.FadeIn();
             if (!inOn) _inputs.FadeIn();
             if (!limOn) _limits.FadeIn();
             if (!tyOn) _tyres.FadeIn();
-            _subTab["laplog"] = _subTab["inputs"] = _subTab["limits"] = _subTab["tyres"] = 0;
+            _subTab["laplog"] = _subTab["inputs"] = _subTab["limits"] = _subTab["tyres"] = _subTab["fps"] = 0;
             RequestSave();
             ShowToast("Everything reset to default");
         };
@@ -773,7 +784,7 @@ public sealed class ControlWindow : Window
         {
             if (selector.SelectedIndex < 0 || selector.SelectedIndex >= screens.Length) return;
             var chosen = screens[selector.SelectedIndex];
-            foreach (var overlay in new[] { _lapLog, _inputs, _limits, _tyres })
+            foreach (var overlay in new[] { _lapLog, _inputs, _limits, _tyres, _fps })
                 overlay.MoveToMonitor(chosen);
             _settings.MonitorDeviceName = chosen.DeviceName;
             RequestSave();
@@ -797,6 +808,7 @@ public sealed class ControlWindow : Window
         ("tyres", "Show / hide tyre strategy", null!),
         ("laplog", "Show / hide lap time log", null!),
         ("inputs", "Show / hide inputs", null!),
+        ("fps", "Show / hide FPS counter", null!),
         ("all", "Show / hide all overlays", "Hides everything; press again to bring them all back"),
     ];
 
@@ -843,6 +855,7 @@ public sealed class ControlWindow : Window
             case "tyres": SetOverlayEnabled(_tyres, !_tyres.Settings.Enabled); break;
             case "laplog": SetOverlayEnabled(_lapLog, !_lapLog.Settings.Enabled); break;
             case "inputs": SetOverlayEnabled(_inputs, !_inputs.Settings.Enabled); break;
+            case "fps": SetOverlayEnabled(_fps, !_fps.Settings.Enabled); break;
             case "all":
                 bool anyShown = AllOverlays.Any(o => o.Settings.Enabled);
                 foreach (var o in AllOverlays) SetOverlayEnabled(o, !anyShown, refresh: false);
@@ -863,7 +876,7 @@ public sealed class ControlWindow : Window
     /// <summary>Keeps the "Show in game" switch in sync when an overlay was toggled from the wheel.</summary>
     private void RefreshOverlayPage()
     {
-        if (_currentPage <= 3 && WindowState != WindowState.Minimized) SelectPage(_currentPage, animateTitle: false);
+        if (_currentPage <= 4 && WindowState != WindowState.Minimized) SelectPage(_currentPage, animateTitle: false);
     }
 
     private void RefreshBindingLabels()
@@ -931,7 +944,7 @@ public sealed class ControlWindow : Window
         return page;
     }
 
-    private OverlayWindow[] AllOverlays => [_lapLog, _inputs, _limits, _tyres];
+    private OverlayWindow[] AllOverlays => [_lapLog, _inputs, _limits, _tyres, _fps];
 
     /// <summary>
     /// The screen you play on: the monitor picked in General, otherwise the screen where your
@@ -960,6 +973,7 @@ public sealed class ControlWindow : Window
         if (o == _lapLog) return new Point(left + width - 300, top + 120);
         if (o == _inputs) return new Point(left + width / 2 - 140, top + height - 130);
         if (o == _limits) return new Point(left + 40, top + 120);
+        if (o == _fps) return new Point(left + width / 2 - 95, top + 20);
         return new Point(left + 40, top + Math.Max(320, height * 0.38)); // tyre strategy: left side, under track limits
     }
 
@@ -992,6 +1006,7 @@ public sealed class ControlWindow : Window
         _inputs.SetLocked(on);
         _limits.SetLocked(on);
         _tyres.SetLocked(on);
+        _fps.SetLocked(on);
         RequestSave();
     }
 
@@ -1209,12 +1224,146 @@ public sealed class ControlWindow : Window
         if (_inputs.IsVisible) _inputs.View.InvalidateVisual();
         if (_limits.IsVisible) _limits.View.InvalidateVisual();
         if (_tyres.IsVisible) _tyres.View.InvalidateVisual();
+        if (_fps.IsVisible) _fps.View.InvalidateVisual();
         if (WindowState != WindowState.Minimized)
             foreach (var p in _previews) { p.InvalidateMeasure(); p.InvalidateVisual(); }
     }
 
+    /// <summary>Starts PresentMon while the FPS counter is on (and set up), stops it when it's off.</summary>
+    private void EnsureFpsMonitor()
+    {
+        bool want = _settings.Fps.Enabled && FpsMonitor.IsDownloaded && FpsMonitor.HasPermission;
+        if (!want) { if (_fpsMonitor.IsRunning) _fpsMonitor.Stop(); return; }
+        if (_fpsMonitor.IsRunning || Environment.TickCount64 < _fpsRetryAt) return;
+        _fpsRetryAt = Environment.TickCount64 + 10_000; // don't hammer it if it keeps exiting
+        _fpsMonitor.Start();
+    }
+
+    private UIElement BuildFpsPage()
+    {
+        var s = _settings.Fps;
+        var w = _fps;
+        void C() { w.ApplyAppearance(); RequestSave(); }
+
+        return OverlayPage("fps", s, w, new FpsView(_hub, s, _fpsMonitor), "Show in game",
+        [
+            ("Setup", () => [FpsSetupCard(), FpsSourceCard(s, C)]),
+            ("Layout", () =>
+            [
+                Card("Size", "Changes apply live",
+                    RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
+                    RowStacked("Width", MakeSlider(120, 320, 5, s.Width, Px, v => { s.Width = v; C(); })),
+                    RowStacked("Text size", MakeSlider(0.6, 2.0, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); })),
+                    RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
+                TransparencyCard(s, C),
+                FontCard(s, C),
+                PositionCard(w),
+            ]),
+            ("Content", () =>
+            [
+                Card("Shown", null,
+                    RowInline("Accent stripe", null, Switch(s.ShowAccentStripe, on => { s.ShowAccentStripe = on; C(); })),
+                    RowInline("\"FPS\" label", null, Switch(s.ShowLabel, on => { s.ShowLabel = on; C(); })),
+                    RowInline("1% low", "Average of your slowest 1% of frames over the last 10 seconds: shows stutter", Switch(s.ShowLow, on => { s.ShowLow = on; C(); })),
+                    RowInline("Frame time", "Milliseconds per frame", Switch(s.ShowFrameTime, on => { s.ShowFrameTime = on; C(); })),
+                    RowInline("Frame time graph", "Spikes are stutters", Switch(s.ShowGraph, on => { s.ShowGraph = on; C(); }))),
+                Card("Colour thresholds", "The number turns green at or above 'good', yellow at or above 'OK', red below.",
+                    RowStacked("Good from", MakeSlider(30, 360, 5, s.GoodFps, v => $"{v:0} fps", v => { s.GoodFps = v; C(); })),
+                    RowStacked("OK from", MakeSlider(20, 240, 5, s.OkFps, v => $"{v:0} fps", v => { s.OkFps = v; C(); }))),
+            ]),
+            ("Colours", () =>
+            [
+                Card("Panel", null,
+                    RowStacked("Background", Colour(s.BackgroundColor, c => { s.BackgroundColor = c; C(); })),
+                    RowStacked("Accent stripe", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
+                    RowStacked("Text", Colour(s.TextColor, c => { s.TextColor = c; C(); }))),
+                Card("Frame rate", null,
+                    RowStacked("Good (and graph)", Colour(s.GoodColor, c => { s.GoodColor = c; C(); })),
+                    RowStacked("OK", Colour(s.OkColor, c => { s.OkColor = c; C(); })),
+                    RowStacked("Low", Colour(s.BadColor, c => { s.BadColor = c; C(); }))),
+            ]),
+        ]);
+    }
+
+    private Border FpsSetupCard()
+    {
+        var rows = new List<UIElement>();
+
+        static UIElement Status(bool ok, string text) => new TextBlock
+        {
+            Text = (ok ? "✓  " : "•  ") + text, FontSize = 13, FontWeight = FontWeights.SemiBold,
+            Foreground = Theme.B(ok ? Theme.Live : Theme.C("#FFFFA21A")), VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        // 1. Download
+        if (FpsMonitor.IsDownloaded)
+            rows.Add(RowInline("1. PresentMon", "Intel's free, open-source frame-time tool", Status(true, "Downloaded")));
+        else
+        {
+            var dl = new PillButton("Download", primary: true);
+            dl.Click += async () =>
+            {
+                ((TextBlock)dl.Child).Text = "Downloading…";
+                var err = await FpsMonitor.DownloadAsync();
+                ShowToast(err ?? "PresentMon downloaded");
+                SelectPage(_currentPage, animateTitle: false);
+            };
+            rows.Add(RowInline("1. PresentMon", "Intel's free, open-source frame-time tool (about 2 MB, from GitHub)", dl));
+        }
+
+        // 2. Permission
+        if (FpsMonitor.HasPermission)
+            rows.Add(RowInline("2. Permission", "Windows lets PresentMon read frame timings", Status(true, "Allowed")));
+        else
+        {
+            var allow = new PillButton("Allow", primary: true);
+            allow.Click += () =>
+            {
+                if (FpsMonitor.GrantPermission(out var err))
+                    ShowToast("Done: sign out of Windows and back in once, then it works");
+                else
+                    ShowToast(err != null ? "Cancelled" : "Couldn't add the permission");
+            };
+            rows.Add(RowInline("2. Permission",
+                "Windows only shares frame timings with admins or the \"Performance Log Users\" group. Allow adds you to that group " +
+                "(you'll see an admin prompt). Then sign out of Windows and back in once.", allow));
+        }
+
+        // 3. Running
+        bool running = _fpsMonitor.IsRunning;
+        string? error = _fpsMonitor.LastError;
+        rows.Add(RowInline("3. Measuring",
+            running ? "Runs in the background while the FPS counter is shown" :
+            !_settings.Fps.Enabled ? "Turn on \"Show in game\" above to start" :
+            error ?? "Starts automatically once steps 1 and 2 are done",
+            Status(running, running ? "Running" : "Not running")));
+
+        return Card("Setup", "One-time setup. FPS can't come from the game's telemetry, so the app measures it the same way benchmark tools do.", rows.ToArray());
+    }
+
+    private Border FpsSourceCard(FpsSettings s, Action changed)
+    {
+        var box = TextInput(s.TargetApp, t => { s.TargetApp = t.Trim(); changed(); });
+        var chips = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+        var auto = new PillButton("Automatic");
+        auto.Click += () => { box.Text = ""; };
+        chips.Children.Add(auto);
+        foreach (var app in _fpsMonitor.ActiveApps().Where(a => !a.StartsWith("F126", StringComparison.OrdinalIgnoreCase)).Take(6))
+        {
+            var chip = new PillButton(app);
+            string name = app;
+            chip.Click += () => { box.Text = name; };
+            chips.Children.Add(chip);
+        }
+        var stack = new StackPanel();
+        stack.Children.Add(RowInline("Game to measure", "Leave empty to measure whatever window has focus (your game while you drive).", box));
+        stack.Children.Add(chips);
+        return Card("Source", "Apps drawing frames right now are listed below; click one to lock the counter to it.", stack);
+    }
+
     private void UpdateStatus()
     {
+        EnsureFpsMonitor();
         bool live;
         string text;
         long packets;
@@ -1242,7 +1391,7 @@ public sealed class ControlWindow : Window
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_closing) { CompositionTarget.Rendering -= OnFrame; _settings.Save(); return; }
+        if (_closing) { CompositionTarget.Rendering -= OnFrame; _fpsMonitor.Stop(); _settings.Save(); return; }
 
         // Play a short exit animation first, then close for real.
         e.Cancel = true;
@@ -1251,6 +1400,7 @@ public sealed class ControlWindow : Window
         _inputs.FadeOut();
         _limits.FadeOut();
         _tyres.FadeOut();
+        _fps.FadeOut();
         var fade = new DoubleAnimation(0, Theme.Ms(180)) { EasingFunction = Anim.Out };
         fade.Completed += (_, _) => Dispatcher.BeginInvoke(new Action(Close));
         _root.BeginAnimation(OpacityProperty, fade);
