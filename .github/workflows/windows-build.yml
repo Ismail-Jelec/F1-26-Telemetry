@@ -3,6 +3,7 @@ name: Windows build
 on:
   push:
     branches:
+      - main
       - feature/monitor-selector
   pull_request:
     branches:
