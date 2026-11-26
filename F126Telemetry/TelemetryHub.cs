@@ -34,6 +34,7 @@ public sealed class TelemetryHub(LapLogger? logger)
     /// <summary>Raised (on the UDP thread) with the button flags that were just pressed down.</summary>
     public event Action<uint>? ButtonsPressed;
     private uint _buttonsHeld;
+    private long _buttonsAt;
 
     /// <summary>Player laps, oldest first.</summary>
     public readonly List<LapRecord> PlayerLaps = [];
@@ -65,6 +66,12 @@ public sealed class TelemetryHub(LapLogger? logger)
             {
                 PacketCount++;
                 LastPacketUtc = DateTime.UtcNow;
+                // The game doesn't reliably send a "released" event, so a button that stayed "held" in our
+                // memory would ignore its next press. Treat the state as released once no button event
+                // has arrived for a moment; while a button is really held the game keeps sending events.
+                long now = Environment.TickCount64;
+                if (now - _buttonsAt > 300) _buttonsHeld = 0;
+                _buttonsAt = now;
                 pressed = held & ~_buttonsHeld; // only buttons that went from up to down
                 _buttonsHeld = held;
             }
