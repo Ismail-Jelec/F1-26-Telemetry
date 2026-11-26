@@ -303,3 +303,17 @@ public sealed class TyreSets
         return t;
     }
 }
+
+/// <summary>Event packet (id 3) helpers.</summary>
+public static class EventPacket
+{
+    /// <summary>True for a "BUTN" event; <paramref name="status"/> holds the buttons currently held down.</summary>
+    public static bool TryReadButtons(ReadOnlySpan<byte> d, out uint status)
+    {
+        status = 0;
+        int code = Spec.HeaderSize;
+        if (d.Length < code + 8 || d[code] != 'B' || d[code + 1] != 'U' || d[code + 2] != 'T' || d[code + 3] != 'N') return false;
+        status = new PacketReader(d, code + 4).U32();
+        return true;
+    }
+}

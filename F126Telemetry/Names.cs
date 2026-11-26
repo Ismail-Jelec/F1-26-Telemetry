@@ -35,6 +35,28 @@ public static class Names
         _ => $"#{visual}",
     };
 
+    /// <summary>Name of a single button flag from the game's button event.</summary>
+    public static string Button(uint flag)
+    {
+        if (flag >= 0x00100000)
+        {
+            int n = 1;
+            for (uint f = 0x00100000; f != 0 && f != flag; f <<= 1) n++;
+            return $"UDP Action {n}";
+        }
+        return flag switch
+        {
+            0x1 => "Cross / A", 0x2 => "Triangle / Y", 0x4 => "Circle / B", 0x8 => "Square / X",
+            0x10 => "D-pad Left", 0x20 => "D-pad Right", 0x40 => "D-pad Up", 0x80 => "D-pad Down",
+            0x100 => "Options / Menu", 0x200 => "L1 / LB", 0x400 => "R1 / RB", 0x800 => "L2 / LT", 0x1000 => "R2 / RT",
+            0x2000 => "Left stick click", 0x4000 => "Right stick click",
+            0x8000 => "Right stick left", 0x10000 => "Right stick right", 0x20000 => "Right stick up", 0x40000 => "Right stick down",
+            0x80000 => "Special",
+            0 => "Not set",
+            _ => $"Button 0x{flag:X}",
+        };
+    }
+
     public static string Gear(sbyte g) => g switch { -1 => "R", 0 => "N", _ => g.ToString() };
 
     public static string LapTime(uint ms)

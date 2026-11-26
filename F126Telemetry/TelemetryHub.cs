@@ -31,6 +31,10 @@ public sealed class TelemetryHub(LapLogger? logger)
     public long DroppedCount;
     public ushort? WrongFormat;   // set if packets arrive in a non-2026 format
 
+    /// <summary>Raised (on the UDP thread) with the button flags that were just pressed down.</summary>
+    public event Action<uint>? ButtonsPressed;
+    private uint _buttonsHeld;
+
     /// <summary>Player laps, oldest first.</summary>
     public readonly List<LapRecord> PlayerLaps = [];
     /// <summary>Fastest valid lap by any car this session (0 = none yet).</summary>
@@ -51,6 +55,23 @@ public sealed class TelemetryHub(LapLogger? logger)
         if (data.Length < Spec.HeaderSize) { DroppedCount++; return; }
 
         var h = PacketHeader.Read(data);
+
+        // Button events are handled on their own: they can arrive in menus (no player car) and the game
+        // has been known to send them with an empty session id, which must not reset the lap history.
+        if (h.PacketId == PacketId.Event && h.PacketFormat == Spec.PacketFormat && EventPacket.TryReadButtons(data, out uint held))
+        {
+            uint pressed;
+            lock (Sync)
+            {
+                PacketCount++;
+                LastPacketUtc = DateTime.UtcNow;
+                pressed = held & ~_buttonsHeld; // only buttons that went from up to down
+                _buttonsHeld = held;
+            }
+            if (pressed != 0) ButtonsPressed?.Invoke(pressed);
+            return;
+        }
+
         lock (Sync)
         {
             PacketCount++;

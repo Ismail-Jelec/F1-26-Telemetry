@@ -32,6 +32,7 @@ The control panel (Overlay Studio) has four pages:
   - **Effects:** new-lap slide and flash, glow on improvement, smooth pedal bars
 - **Track limits**: separate overlay counting corner-cutting warnings against your limit (pips, colour changes, flash), plus invalid laps, total warnings and penalties
 - **Tyre strategy**: best tyre right now for the weather, wear per wheel and laps left at your pit-wear limit, the forecast with rain chances, and when to make your next stop and on which tyre (dry sets picked from your available sets; inters or wets if rain is coming)
+- **Wheel buttons**: bind wheel buttons (via the game's UDP Action 1–12 bindings) to switch track limits ⇄ tyre strategy, or show/hide any overlay while driving
 - **Themes**: one-click looks (Classic F1, Midnight, Neon, Stealth, Papaya, Racing Green)
 - **General**: lock overlays, lap CSV logging, demo data, reset
 

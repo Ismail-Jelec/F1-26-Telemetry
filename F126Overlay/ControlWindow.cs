@@ -138,6 +138,7 @@ public sealed class ControlWindow : Window
         _pages.Add((null!, BuildInputsPage, "Inputs", "Gear, speed and a live throttle / brake trace"));
         _pages.Add((null!, BuildTrackLimitsPage, "Track limits", "Corner-cutting warnings, invalid laps and penalties"));
         _pages.Add((null!, BuildTyresPage, "Tyre strategy", "Best tyre for wear and weather, and your next stop"));
+        _pages.Add((null!, BuildWheelPage, "Wheel buttons", "Toggle overlays from your wheel while you drive"));
         _pages.Add((null!, BuildThemesPage, "Themes", "One-click looks for all overlays"));
         _pages.Add((null!, BuildGeneralPage, "General", "Locking, lap logging, demo data and reset"));
         BuildNav();
@@ -167,6 +168,8 @@ public sealed class ControlWindow : Window
             SelectPage(0);
         };
         Closing += OnClosing;
+
+        hub.ButtonsPressed += flags => Dispatcher.BeginInvoke(new Action(() => OnWheelButtons(flags)));
 
         CompositionTarget.Rendering += OnFrame;
         var statusTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
@@ -226,7 +229,7 @@ public sealed class ControlWindow : Window
 
     private void BuildNav()
     {
-        string[] icons = ["\uE823", "\uE7FC", "\uE7BA", "\uE9CA", "\uE790", "\uE713"];
+        string[] icons = ["\uE823", "\uE7FC", "\uE7BA", "\uE9CA", "\uE765", "\uE790", "\uE713"];
         for (int i = 0; i < _pages.Count; i++)
         {
             int index = i;
@@ -293,6 +296,7 @@ public sealed class ControlWindow : Window
 
     private void SelectPage(int index, bool animateTitle = true)
     {
+        _learningKey = null; // leaving the page cancels a pending "press a button"
         _currentPage = index;
         for (int i = 0; i < _pages.Count; i++) _pages[i].Item.SetSelected(i == index);
         var page = _pages[index];
@@ -775,6 +779,149 @@ public sealed class ControlWindow : Window
             Foreground = Theme.B(Theme.Muted), FontSize = 12, TextWrapping = TextWrapping.Wrap
         };
         return Card("Display / monitor", "Choose which screen shows your overlays.", selector, hint);
+    }
+
+    // ───────────────────────────── wheel buttons ─────────────────────────────
+
+    private static readonly (string Key, string Title, string Description)[] WheelActions =
+    [
+        ("swap", "Switch track limits / tyre strategy", "Shows one and hides the other, so they can share a spot on screen"),
+        ("limits", "Show / hide track limits", null!),
+        ("tyres", "Show / hide tyre strategy", null!),
+        ("laplog", "Show / hide lap time log", null!),
+        ("inputs", "Show / hide inputs", null!),
+        ("all", "Show / hide all overlays", "Hides everything; press again to bring them all back"),
+    ];
+
+    private string? _learningKey;
+    private readonly Dictionary<string, TextBlock> _bindingLabels = [];
+    private TextBlock? _lastButtonText;
+
+    private void OnWheelButtons(uint flags)
+    {
+        uint lowest = flags & (~flags + 1);
+        if (_lastButtonText != null)
+        {
+            _lastButtonText.Text = Names.Button(lowest);
+            Anim.EnterUp(_lastButtonText, 0, 6);
+        }
+
+        if (_learningKey is string key)
+        {
+            // Each button does one thing: take it away from any other action first.
+            foreach (var other in _settings.WheelButtons.Where(b => b.Value == lowest && b.Key != key).Select(b => b.Key).ToList())
+                _settings.WheelButtons[other] = 0;
+            _settings.WheelButtons[key] = lowest;
+            _learningKey = null;
+            RequestSave();
+            RefreshBindingLabels();
+            ShowToast($"Bound to {Names.Button(lowest)}");
+            return;
+        }
+
+        foreach (var (actionKey, flag) in _settings.WheelButtons.ToList())
+            if (flag != 0 && (flags & flag) != 0) RunWheelAction(actionKey);
+    }
+
+    private void RunWheelAction(string key)
+    {
+        switch (key)
+        {
+            case "swap":
+                bool tyresShown = _settings.Tyres.Enabled;
+                SetOverlayEnabled(_tyres, !tyresShown);
+                SetOverlayEnabled(_limits, tyresShown);
+                break;
+            case "limits": SetOverlayEnabled(_limits, !_limits.Settings.Enabled); break;
+            case "tyres": SetOverlayEnabled(_tyres, !_tyres.Settings.Enabled); break;
+            case "laplog": SetOverlayEnabled(_lapLog, !_lapLog.Settings.Enabled); break;
+            case "inputs": SetOverlayEnabled(_inputs, !_inputs.Settings.Enabled); break;
+            case "all":
+                bool anyShown = AllOverlays.Any(o => o.Settings.Enabled);
+                foreach (var o in AllOverlays) SetOverlayEnabled(o, !anyShown, refresh: false);
+                RefreshOverlayPage();
+                break;
+        }
+    }
+
+    private void SetOverlayEnabled(OverlayWindow w, bool on, bool refresh = true)
+    {
+        if (w.Settings.Enabled == on) return;
+        w.Settings.Enabled = on;
+        if (on) w.FadeIn(); else w.FadeOut();
+        RequestSave();
+        if (refresh) RefreshOverlayPage();
+    }
+
+    /// <summary>Keeps the "Show in game" switch in sync when an overlay was toggled from the wheel.</summary>
+    private void RefreshOverlayPage()
+    {
+        if (_currentPage <= 3 && WindowState != WindowState.Minimized) SelectPage(_currentPage, animateTitle: false);
+    }
+
+    private void RefreshBindingLabels()
+    {
+        foreach (var (key, label) in _bindingLabels)
+        {
+            label.BeginAnimation(OpacityProperty, null);
+            label.Opacity = 1;
+            uint flag = _settings.WheelButtons.TryGetValue(key, out var f) ? f : 0;
+            label.Text = Names.Button(flag);
+            label.Foreground = Theme.B(flag != 0 ? Theme.TextColor : Theme.Muted);
+        }
+    }
+
+    private UIElement BuildWheelPage()
+    {
+        var page = new StackPanel();
+        _bindingLabels.Clear();
+        _learningKey = null;
+
+        page.Children.Add(Card("Set it up once",
+            "1. In F1 26, open the controls settings for your wheel and bind a button to \"UDP Action 1\" " +
+            "(any of UDP Action 1–12 works, and normal buttons are reported too).\n" +
+            "2. Here, click Bind next to an action and press that button on your wheel.\n" +
+            "3. Telemetry has to be on: the button press reaches the app through the same UDP data."));
+
+        _lastButtonText = new TextBlock { Text = "–", FontSize = 18, FontWeight = FontWeights.Bold, Foreground = Theme.B(Theme.TextColor) };
+        page.Children.Add(Card("Test", "Press a button on your wheel while the game is running; it shows up here.",
+            RowInline("Last button pressed", null, _lastButtonText)));
+
+        var rows = new List<UIElement>();
+        foreach (var (key, title, description) in WheelActions)
+        {
+            uint flag = _settings.WheelButtons.TryGetValue(key, out var f) ? f : 0;
+            var label = new TextBlock
+            {
+                Text = Names.Button(flag), FontSize = 13, FontWeight = FontWeights.SemiBold, MinWidth = 120,
+                Foreground = Theme.B(flag != 0 ? Theme.TextColor : Theme.Muted), VerticalAlignment = VerticalAlignment.Center,
+                TextAlignment = TextAlignment.Right, Margin = new Thickness(0, 0, 12, 6),
+            };
+            _bindingLabels[key] = label;
+
+            var bind = new PillButton("Bind", primary: true);
+            string actionKey = key;
+            bind.Click += () =>
+            {
+                RefreshBindingLabels();
+                if (_learningKey == actionKey) { _learningKey = null; return; }
+                _learningKey = actionKey;
+                label.Text = "Press a button…";
+                label.Foreground = Theme.B(Theme.Accent);
+                label.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(1, 0.35, Theme.Ms(600))
+                    { AutoReverse = true, RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
+            };
+            var clear = new PillButton("Clear");
+            clear.Click += () => { _settings.WheelButtons[actionKey] = 0; if (_learningKey == actionKey) _learningKey = null; RequestSave(); RefreshBindingLabels(); };
+
+            var controls = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            controls.Children.Add(label);
+            controls.Children.Add(bind);
+            controls.Children.Add(clear);
+            rows.Add(RowInline(title, description, controls));
+        }
+        page.Children.Add(Card("Actions", "Each button can do one thing. Binding a button that's already used moves it here.", rows.ToArray()));
+        return page;
     }
 
     private OverlayWindow[] AllOverlays => [_lapLog, _inputs, _limits, _tyres];

@@ -161,6 +161,9 @@ public sealed class Settings
     public TrackLimitsSettings TrackLimits { get; set; } = new();
     public TyreStrategySettings Tyres { get; set; } = new();
 
+    /// <summary>Wheel/controller button flag per action key (0 = not bound). Default: UDP Action 1 switches limits/tyres.</summary>
+    public Dictionary<string, uint> WheelButtons { get; set; } = new() { ["swap"] = 0x00100000 };
+
     private static readonly string Dir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "F126Overlay");
     private static readonly string FilePath = Path.Combine(Dir, "settings.json");
@@ -176,6 +179,7 @@ public sealed class Settings
                 s.Inputs ??= new();
                 s.TrackLimits ??= new();
                 s.Tyres ??= new();
+                s.WheelButtons ??= new();
                 return s;
             }
         }
