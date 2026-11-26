@@ -62,7 +62,7 @@ public sealed class LapLogger(string rootDir)
 
         if (lap.Sector1Ms > 0) _s1 = lap.Sector1Ms;
         if (lap.Sector2Ms > 0) _s2 = lap.Sector2Ms;
-        _invalid |= lap.CurrentLapInvalid;
+        _invalid = lap.CurrentLapInvalid; // latest verdict; the game clears it after flashbacks/restarts
 
         // Flashback within the lap: distance jumps backwards, so trim samples past the new point.
         if (lap.LapDistance >= 0 && lap.LapDistance < _lastDistance - 50f)

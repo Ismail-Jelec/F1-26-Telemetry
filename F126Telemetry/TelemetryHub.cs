@@ -154,15 +154,11 @@ public sealed class TelemetryHub(LapLogger? logger)
                 }
             }
 
-            if (l.CurrentLapNum != prev)
-            {
-                _carLapNum[i] = l.CurrentLapNum;
-                _carLapInvalid[i] = l.CurrentLapInvalid;
-            }
-            else
-            {
-                _carLapInvalid[i] |= l.CurrentLapInvalid;
-            }
+            // Keep the game's *latest* verdict, not a sticky one: the game clears the flag again after a
+            // flashback or a lap restart (common in Time Trial), and the last value before the lap number
+            // changes is what the game actually counted.
+            _carLapNum[i] = l.CurrentLapNum;
+            _carLapInvalid[i] = l.CurrentLapInvalid;
         }
     }
 }
