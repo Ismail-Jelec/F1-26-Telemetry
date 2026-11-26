@@ -132,7 +132,7 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
 
         if (s.ShowAccentStripe)
         {
-            dc.DrawRectangle(Theme.Brush(s.AccentColor), null, new Rect(0, 0, w, 3));
+            dc.DrawRectangle(Theme.Brush(s.AccentColor, s.AccentOpacity), null, new Rect(0, 0, w, 3));
             y += 3;
         }
         if (s.ShowTitle)
@@ -486,7 +486,7 @@ public sealed class TrackLimitsView(TelemetryHub hub, TrackLimitsSettings s) : O
 
         if (s.ShowAccentStripe)
         {
-            dc.DrawRectangle(Theme.Brush(s.AccentColor), null, new Rect(0, 0, w, 3));
+            dc.DrawRectangle(Theme.Brush(s.AccentColor, s.AccentOpacity), null, new Rect(0, 0, w, 3));
             y += 3;
         }
         if (s.ShowTitle)
@@ -564,7 +564,7 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
         var line = Theme.Brush("#FFFFFF", 0.07);
 
         BeginPanel(dc, size);
-        if (s.ShowAccentStripe) { dc.DrawRectangle(Theme.Brush(s.AccentColor), null, new Rect(0, 0, w, 3)); y += 3; }
+        if (s.ShowAccentStripe) { dc.DrawRectangle(Theme.Brush(s.AccentColor, s.AccentOpacity), null, new Rect(0, 0, w, 3)); y += 3; }
         if (s.ShowTitle)
         {
             dc.DrawRectangle(Theme.Brush("#000000", 0.25), null, new Rect(0, y, w, H(24)));
@@ -704,16 +704,19 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
 /// <summary>FPS counter: frame rate of the game (via PresentMon), 1% low, frame time and a frame-time graph.</summary>
 public sealed class FpsView(TelemetryHub hub, FpsSettings s, FpsMonitor monitor) : OverlayView(hub, s)
 {
+    private const double Pad = 10;
+
     private string? _app;
     private double _appCheckedAt = double.MinValue;
     private double _shownFps;
+    private (double Fps, double Low1, double FrameMs, double[] Recent)? _stats;
+    private string _status = "";
 
-    private double W => Math.Round(Math.Clamp(s.Width, 120, 320));
     private double Fs => Math.Clamp(s.TextScale, 0.6, 2.0);
     private double MainH => Math.Round(54 * Fs);
-    private double GraphH => s.ShowGraph ? Math.Round(30 * Fs) : 0;
-
-    protected override Size ContentSize => new(W, (s.ShowAccentStripe ? 3 : 0) + MainH + GraphH);
+    private double GraphH => Math.Round(30 * Fs);
+    private bool HasRight => s.ShowLow || s.ShowFrameTime || (s.ShowStatus && _stats == null);
+    private bool HasMain => s.ShowNumber || HasRight;
 
     /// <summary>The app being measured: the one you chose, else the focused window (checked twice a second).</summary>
     private string? TargetApp()
@@ -728,56 +731,110 @@ public sealed class FpsView(TelemetryHub hub, FpsSettings s, FpsMonitor monitor)
         return _app;
     }
 
-    protected override void OnRender(DrawingContext dc)
+    // Widths of each part, so the panel can shrink to what's switched on.
+    private double NumberW => Text("000", 30 * Fs, Brushes.White, heavy: true).Width + (s.ShowLabel ? Text("FPS", 11 * Fs, Brushes.White, heavy: true).Width + 5 : 0);
+    private double RightW
     {
-        var size = ContentSize;
-        double w = W, fs = Fs, y = 0;
-        var text = Theme.Brush(s.TextColor);
-        var muted = Theme.Brush(s.TextColor, 0.6);
+        get
+        {
+            double w = 0;
+            if (_stats != null)
+            {
+                if (s.ShowLow) w = Math.Max(w, Text("1% 000", 11 * Fs, Brushes.White, heavy: true).Width);
+                if (s.ShowFrameTime) w = Math.Max(w, Text("00.0 ms", 11 * Fs, Brushes.White).Width);
+            }
+            else if (s.ShowStatus) w = Text(_status, 10 * Fs, Brushes.White).Width;
+            return w;
+        }
+    }
 
+    private double W
+    {
+        get
+        {
+            if (!s.AutoWidth) return Math.Round(Math.Clamp(s.Width, 80, 320));
+            double content = (s.ShowNumber ? NumberW : 0) + (s.ShowNumber && RightW > 0 ? 16 : 0) + RightW;
+            if (s.ShowGraph) content = Math.Max(content, 90 * Fs);
+            return Math.Round(Math.Max(40, content + Pad * 2));
+        }
+    }
+
+    protected override Size ContentSize =>
+        new(W, Math.Max(8, (s.ShowAccentStripe ? 3 : 0) + (HasMain ? MainH : 0) + (s.ShowGraph ? GraphH : 0)));
+
+    private void Refresh()
+    {
         string? app = TargetApp();
-        var stats = app != null ? monitor.Stats(app) : null;
-        string status =
+        _stats = app != null ? monitor.Stats(app) : null;
+        _status =
             !FpsMonitor.IsDownloaded || !FpsMonitor.HasPermission ? "setup needed" :
             !monitor.IsRunning ? "not running" :
-            stats == null ? "waiting for game" : "";
+            _stats == null ? "waiting for game" : "";
+    }
+
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        Refresh();
+        return ContentSize;
+    }
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        Refresh();
+        var size = ContentSize;
+        if (Math.Abs(size.Width - ActualWidth) > 0.5 || Math.Abs(size.Height - ActualHeight) > 0.5) InvalidateMeasure();
+
+        double w = size.Width, fs = Fs, y = 0;
+        var muted = Theme.Brush(s.TextColor, 0.6);
 
         BeginPanel(dc, size);
-        if (s.ShowAccentStripe) { dc.DrawRectangle(Theme.Brush(s.AccentColor), null, new Rect(0, 0, w, 3)); y += 3; }
+        if (s.ShowAccentStripe) { dc.DrawRectangle(Theme.Brush(s.AccentColor, s.AccentOpacity), null, new Rect(0, 0, w, 3)); y += 3; }
 
-        double cy = y + MainH / 2;
-        if (stats is { } st)
+        if (HasMain)
         {
-            // Ease the number a little so it's readable instead of flickering every frame.
-            _shownFps = _shownFps <= 0 ? st.Fps : _shownFps + (st.Fps - _shownFps) * 0.15;
-            string hex = _shownFps >= s.GoodFps ? s.GoodColor : _shownFps >= s.OkFps ? s.OkColor : s.BadColor;
-            var num = DrawText(dc, Math.Round(_shownFps).ToString(CultureInfo.InvariantCulture), 30 * fs, Theme.Brush(hex), 12, cy, heavy: true);
-            if (s.ShowLabel) DrawText(dc, "FPS", 11 * fs, muted, num.Right + 5, cy + 6 * fs, heavy: true);
-
-            double ry = s.ShowLow && s.ShowFrameTime ? cy - 8 * fs : cy;
-            if (s.ShowLow)
+            double cy = y + MainH / 2;
+            if (_stats is { } st)
             {
-                string lowHex = st.Low1 >= s.GoodFps ? s.GoodColor : st.Low1 >= s.OkFps ? s.OkColor : s.BadColor;
-                DrawText(dc, $"1% {Math.Round(st.Low1)}", 11 * fs, Theme.Brush(lowHex), w - 10, ry, TextAlignment.Right, heavy: true);
-                ry += 16 * fs;
+                // Ease the number a little so it's readable instead of flickering every frame.
+                _shownFps = _shownFps <= 0 ? st.Fps : _shownFps + (st.Fps - _shownFps) * 0.15;
+                if (s.ShowNumber)
+                {
+                    string hex = _shownFps >= s.GoodFps ? s.GoodColor : _shownFps >= s.OkFps ? s.OkColor : s.BadColor;
+                    var num = DrawText(dc, Math.Round(_shownFps).ToString(CultureInfo.InvariantCulture), 30 * fs, Theme.Brush(hex), Pad, cy, heavy: true);
+                    if (s.ShowLabel) DrawText(dc, "FPS", 11 * fs, muted, num.Right + 5, cy + 6 * fs, heavy: true);
+                }
+
+                double rx = s.ShowNumber ? w - Pad : Pad;
+                var align = s.ShowNumber ? TextAlignment.Right : TextAlignment.Left;
+                double ry = s.ShowLow && s.ShowFrameTime ? cy - 8 * fs : cy;
+                if (s.ShowLow)
+                {
+                    string lowHex = st.Low1 >= s.GoodFps ? s.GoodColor : st.Low1 >= s.OkFps ? s.OkColor : s.BadColor;
+                    DrawText(dc, $"1% {Math.Round(st.Low1)}", 11 * fs, Theme.Brush(lowHex), rx, ry, align, heavy: true);
+                    ry += 16 * fs;
+                }
+                if (s.ShowFrameTime)
+                    DrawText(dc, $"{st.FrameMs:0.0} ms", 11 * fs, muted, rx, ry, align);
             }
-            if (s.ShowFrameTime)
-                DrawText(dc, $"{st.FrameMs:0.0} ms", 11 * fs, muted, w - 10, ry, TextAlignment.Right);
+            else
+            {
+                _shownFps = 0;
+                if (s.ShowNumber)
+                {
+                    var num = DrawText(dc, "–", 30 * fs, muted, Pad, cy, heavy: true);
+                    if (s.ShowLabel) DrawText(dc, "FPS", 11 * fs, muted, num.Right + 5, cy + 6 * fs, heavy: true);
+                }
+                if (s.ShowStatus)
+                    DrawText(dc, _status, 10 * fs, muted, s.ShowNumber ? w - Pad : Pad, cy, s.ShowNumber ? TextAlignment.Right : TextAlignment.Left);
+            }
+            y += MainH;
         }
-        else
-        {
-            _shownFps = 0;
-            var num = DrawText(dc, "–", 30 * fs, muted, 12, cy, heavy: true);
-            if (s.ShowLabel) DrawText(dc, "FPS", 11 * fs, muted, num.Right + 5, cy + 6 * fs, heavy: true);
-            DrawText(dc, status, 10 * fs, muted, w - 10, cy, TextAlignment.Right);
-        }
-        y += MainH;
 
         if (s.ShowGraph)
         {
-            var area = new Rect(10, y, w - 20, GraphH - 8);
+            var area = new Rect(Pad, y + (HasMain ? 0 : 6), w - Pad * 2, GraphH - (HasMain ? 8 : 12));
             dc.DrawRoundedRectangle(Theme.Brush("#000000", 0.3), null, area, InnerRadius, InnerRadius);
-            if (stats is { } g && g.Recent.Length > 1)
+            if (_stats is { } g && g.Recent.Length > 1)
             {
                 // Scale so the "OK" frame time sits at mid height; spikes go to the top.
                 double maxMs = 2000.0 / Math.Max(1, s.OkFps);

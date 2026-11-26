@@ -450,6 +450,7 @@ public sealed class ControlWindow : Window
                     RowStacked("Row stripes", Colour(s.StripeColor, c => { s.StripeColor = c; C(); }))),
                 Card("Highlights", null,
                     RowStacked("Accent stripe", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
+                    RowStacked("Accent stripe opacity", MakeSlider(0, 1, 0.05, s.AccentOpacity, Pct, v => { s.AccentOpacity = v; C(); })),
                     RowStacked("Personal best row", Colour(s.PersonalBestColor, c => { s.PersonalBestColor = c; C(); })),
                     RowStacked("Session best row", Colour(s.SessionBestColor, c => { s.SessionBestColor = c; C(); }))),
                 Card("Text", null,
@@ -558,6 +559,7 @@ public sealed class ControlWindow : Window
                 Card("Panel", null,
                     RowStacked("Background", Colour(s.BackgroundColor, c => { s.BackgroundColor = c; C(); })),
                     RowStacked("Accent stripe", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
+                    RowStacked("Accent stripe opacity", MakeSlider(0, 1, 0.05, s.AccentOpacity, Pct, v => { s.AccentOpacity = v; C(); })),
                     RowStacked("Text", Colour(s.TextColor, c => { s.TextColor = c; C(); }))),
                 Card("Status", "The counter changes colour as you collect warnings",
                     RowStacked("Clean (0 warnings)", Colour(s.OkColor, c => { s.OkColor = c; C(); })),
@@ -617,6 +619,7 @@ public sealed class ControlWindow : Window
                 Card("Panel", null,
                     RowStacked("Background", Colour(s.BackgroundColor, c => { s.BackgroundColor = c; C(); })),
                     RowStacked("Accent stripe", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
+                    RowStacked("Accent stripe opacity", MakeSlider(0, 1, 0.05, s.AccentOpacity, Pct, v => { s.AccentOpacity = v; C(); })),
                     RowStacked("Text", Colour(s.TextColor, c => { s.TextColor = c; C(); })),
                     RowStacked("Alerts (box now, weather change)", Colour(s.AlertColor, c => { s.AlertColor = c; C(); }))),
                 Card("Tyre compounds", null,
@@ -702,8 +705,14 @@ public sealed class ControlWindow : Window
             foreach (var o in AllOverlays) { o.Settings.CornerRadius = v; o.ApplyAppearance(); }
             RequestSave();
         });
-        page.Children.Add(Card("Rounded corners", "Sets the corner radius of every overlay at once, including the boxes inside them. You can still fine-tune each overlay under Layout.",
-            RowStacked("Corner radius, all overlays", allRadius)));
+        var allAccent = MakeSlider(0, 1, 0.05, _settings.LapLog.AccentOpacity, Pct, v =>
+        {
+            foreach (var o in AllOverlays) { o.Settings.AccentOpacity = v; o.ApplyAppearance(); }
+            RequestSave();
+        });
+        page.Children.Add(Card("All overlays", "Changes every overlay at once (corner radius includes the boxes inside them). You can still fine-tune each overlay on its own page.",
+            RowStacked("Corner radius", allRadius),
+            RowStacked("Accent stripe opacity (the thin coloured line on top)", allAccent)));
 
         page.Children.Add(Card("Pick a theme", "Sets colours, font and corner radius on all overlays. You can still fine-tune everything afterwards.", grid));
         return page;
@@ -1252,7 +1261,8 @@ public sealed class ControlWindow : Window
             [
                 Card("Size", "Changes apply live",
                     RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
-                    RowStacked("Width", MakeSlider(120, 320, 5, s.Width, Px, v => { s.Width = v; C(); })),
+                    RowInline("Fit width to content", "The panel shrinks to what's switched on", Switch(s.AutoWidth, on => { s.AutoWidth = on; C(); })),
+                    RowStacked("Width (when not fitting)", MakeSlider(80, 320, 5, s.Width, Px, v => { s.Width = v; C(); })),
                     RowStacked("Text size", MakeSlider(0.6, 2.0, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); })),
                     RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
                 TransparencyCard(s, C),
@@ -1263,10 +1273,12 @@ public sealed class ControlWindow : Window
             [
                 Card("Shown", null,
                     RowInline("Accent stripe", null, Switch(s.ShowAccentStripe, on => { s.ShowAccentStripe = on; C(); })),
+                    RowInline("FPS number", "The big frame rate", Switch(s.ShowNumber, on => { s.ShowNumber = on; C(); })),
                     RowInline("\"FPS\" label", null, Switch(s.ShowLabel, on => { s.ShowLabel = on; C(); })),
                     RowInline("1% low", "Average of your slowest 1% of frames over the last 10 seconds: shows stutter", Switch(s.ShowLow, on => { s.ShowLow = on; C(); })),
                     RowInline("Frame time", "Milliseconds per frame", Switch(s.ShowFrameTime, on => { s.ShowFrameTime = on; C(); })),
-                    RowInline("Frame time graph", "Spikes are stutters", Switch(s.ShowGraph, on => { s.ShowGraph = on; C(); }))),
+                    RowInline("Frame time graph", "Spikes are stutters", Switch(s.ShowGraph, on => { s.ShowGraph = on; C(); })),
+                    RowInline("Status text", "\"waiting for game\" / \"setup needed\" when there's no reading", Switch(s.ShowStatus, on => { s.ShowStatus = on; C(); }))),
                 Card("Colour thresholds", "The number turns green at or above 'good', yellow at or above 'OK', red below.",
                     RowStacked("Good from", MakeSlider(30, 360, 5, s.GoodFps, v => $"{v:0} fps", v => { s.GoodFps = v; C(); })),
                     RowStacked("OK from", MakeSlider(20, 240, 5, s.OkFps, v => $"{v:0} fps", v => { s.OkFps = v; C(); }))),
@@ -1276,6 +1288,7 @@ public sealed class ControlWindow : Window
                 Card("Panel", null,
                     RowStacked("Background", Colour(s.BackgroundColor, c => { s.BackgroundColor = c; C(); })),
                     RowStacked("Accent stripe", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
+                    RowStacked("Accent stripe opacity", MakeSlider(0, 1, 0.05, s.AccentOpacity, Pct, v => { s.AccentOpacity = v; C(); })),
                     RowStacked("Text", Colour(s.TextColor, c => { s.TextColor = c; C(); }))),
                 Card("Frame rate", null,
                     RowStacked("Good (and graph)", Colour(s.GoodColor, c => { s.GoodColor = c; C(); })),

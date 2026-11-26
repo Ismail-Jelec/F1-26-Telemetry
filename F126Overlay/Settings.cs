@@ -11,6 +11,7 @@ public abstract class OverlaySettings
     public double BackgroundOpacity { get; set; } = 0.9;
     public string BackgroundColor { get; set; } = "#141419";
     public double CornerRadius { get; set; } = 0;
+    public double AccentOpacity { get; set; } = 1.0;
     public string FontFamily { get; set; } = "Segoe UI";
     public double[]? Position { get; set; }
 }
@@ -153,6 +154,7 @@ public sealed class FpsSettings : OverlaySettings
 
     // Layout
     public double Width { get; set; } = 190;
+    public bool AutoWidth { get; set; } = true;
     public double TextScale { get; set; } = 1.0;
 
     // Source
@@ -163,7 +165,9 @@ public sealed class FpsSettings : OverlaySettings
 
     // Content
     public bool ShowAccentStripe { get; set; } = true;
+    public bool ShowNumber { get; set; } = true;
     public bool ShowLabel { get; set; } = true;
+    public bool ShowStatus { get; set; } = true;
     public bool ShowLow { get; set; } = true;
     public bool ShowFrameTime { get; set; } = true;
     public bool ShowGraph { get; set; } = true;
