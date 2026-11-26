@@ -395,7 +395,9 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
         double boxX = Math.Round(w * 0.446);
         if (!Tiles)
             dc.DrawRoundedRectangle(Theme.Brush("#000000", 0.3), null, new Rect(boxX, y + h * 0.17, w - boxX - 8, h * 0.66), InnerRadius, InnerRadius);
-        DrawText(dc, LapTime(ms), 21 * fs, Theme.Brush(Tiles ? tileHex : s.TextColor), w - 14, y + h / 2, TextAlignment.Right, heavy: true, numeric: true);
+        // Centre the time in its box (the same area in tile mode, where there's no box).
+        double boxW = w - boxX - 8;
+        DrawText(dc, LapTime(ms), 21 * fs, Theme.Brush(Tiles ? tileHex : s.TextColor), boxX + boxW / 2, y + h / 2, TextAlignment.Center, heavy: true, numeric: true);
     }
 }
 
