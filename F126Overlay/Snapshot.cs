@@ -24,7 +24,6 @@ public static class Snapshot
 
         var monitor = new FpsMonitor();
         var rng = new Random(7);
-        monitor.AddFakeFrames("F1_25.exe", Enumerable.Range(0, 1400).Select(i => 6.9 + rng.NextDouble() * 0.8 + (i % 211 == 0 ? 9 : 0)));
 
         var looks = new List<(string Name, Settings Settings)> { ("default", new Settings()) };
         foreach (var theme in OverlayTheme.All)
@@ -36,6 +35,8 @@ public static class Snapshot
 
         foreach (var (name, s) in looks)
         {
+            // Fresh fake frames right before rendering (the counter only shows the last couple of seconds).
+            monitor.AddFakeFrames("F1_25.exe", Enumerable.Range(0, 1400).Select(i => 6.9 + rng.NextDouble() * 0.8 + (i % 211 == 0 ? 9 : 0)));
             s.Fps.Enabled = true;
             s.Fps.TargetApp = "F1_25.exe";
             var views = new (string Title, FrameworkElement View)[]

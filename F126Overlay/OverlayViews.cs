@@ -52,6 +52,9 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
 
     protected FormattedText Text(string s, double size, Brush brush, bool heavy = false, bool numeric = false)
     {
+        // The 7-segment font can't show letters clearly ("SB" reads as "56"), so text with letters
+        // in it, like "PB", "kg" or "none", always uses the normal font.
+        if (numeric && DigitalNumbers && s.Any(char.IsLetter)) numeric = false;
         var faces = numeric ? NumberFaces : Faces;
         // 7-segment digits are big for their point size; scale them down to sit with normal text.
         if (numeric && DigitalNumbers) size *= 0.8;
@@ -60,6 +63,9 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
     }
 
     protected bool Tiles => _base.Style == "Tiles";
+
+    /// <summary>The thin accent line on top: hidden in tile mode, where every tile has its own coloured outline.</summary>
+    protected bool ShowStripe(bool enabled) => enabled && !Tiles;
 
     /// <summary>
     /// Dash-style tile: dark glassy fill tinted with the colour, a coloured outline and an optional soft glow.
@@ -149,7 +155,7 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
     private int RowCount => Math.Clamp(s.Rows, 1, 30);
 
     protected override Size ContentSize => new(W,
-        (s.ShowAccentStripe ? 3 : 0) + (s.ShowTitle ? TitleH : 0) + (s.ShowPersonalBest ? BestH : 0) +
+        (ShowStripe(s.ShowAccentStripe) ? 3 : 0) + (s.ShowTitle ? TitleH : 0) + (s.ShowPersonalBest ? BestH : 0) +
         (s.ShowSessionBest ? BestH : 0) + (s.ShowColumnHeaders ? RowH : 0) + RowCount * RowH);
 
     protected override void OnRender(DrawingContext dc)
@@ -175,16 +181,15 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
         BeginPanel(dc, size);
         double y = 0;
 
-        if (s.ShowAccentStripe)
+        if (ShowStripe(s.ShowAccentStripe))
         {
             dc.DrawRectangle(Theme.Brush(s.AccentColor, s.AccentOpacity), null, new Rect(0, 0, w, 3));
             y += 3;
         }
         if (s.ShowTitle)
         {
-            if (Tiles) DrawTile(dc, TileRect(0, y, w, TitleH, 3), s.AccentColor);
-            else dc.DrawRectangle(Theme.Brush(s.TitleBarColor, Math.Min(1, bgAlpha + 0.05)), null, new Rect(0, y, w, TitleH));
-            DrawText(dc, s.TitleText ?? "", 11 * fs, text, w / 2, y + TitleH / 2, TextAlignment.Center, heavy: true);
+            if (!Tiles) dc.DrawRectangle(Theme.Brush(s.TitleBarColor, Math.Min(1, bgAlpha + 0.05)), null, new Rect(0, y, w, TitleH));
+            DrawText(dc, s.TitleText ?? "", 11 * fs, Tiles ? Theme.Brush(s.AccentColor) : text, w / 2, y + TitleH / 2, TextAlignment.Center, heavy: true);
             y += TitleH;
         }
         if (s.ShowPersonalBest)
@@ -260,7 +265,15 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
             int parity = lap != null ? lap.Lap : (s.NewestOnTop ? topLap - i : i);
             if (s.Stripes && (parity & 1) == 1)
                 dc.DrawRectangle(Theme.Brush(s.StripeColor, Tiles ? bgAlpha * 0.6 : bgAlpha), null, new Rect(rowX, ry, rowW, rowH));
-            if (lap == null) continue;
+            if (lap == null)
+            {
+                // Faint placeholders so unused rows read as "waiting for laps", not as a broken block.
+                double py = ry + rowH / 2;
+                var faint = Theme.Brush(s.TextColor, 0.18);
+                DrawText(dc, "–", 12 * fs, faint, 10, py);
+                DrawText(dc, "--:--.---", 12 * fs, faint, timeX, py, numeric: true);
+                continue;
+            }
 
             if (newest && s.FlashNewLap && t < 1.6)
                 dc.DrawRectangle(Theme.Brush(_flashHex, 0.5 * (1 - t / 1.6)), null, new Rect(rowX, ry, rowW, rowH));
@@ -499,7 +512,7 @@ public sealed class TrackLimitsView(TelemetryHub hub, TrackLimitsSettings s) : O
     private int StatCount => (s.ShowInvalidLaps ? 1 : 0) + (s.ShowTotalWarnings ? 1 : 0) + (s.ShowPenalties ? 1 : 0);
 
     protected override Size ContentSize => new(W,
-        (s.ShowAccentStripe ? 3 : 0) + (s.ShowTitle ? TitleH : 0) + MainH + (StatCount > 0 ? StatCount * StatH + 6 : 0));
+        (ShowStripe(s.ShowAccentStripe) ? 3 : 0) + (s.ShowTitle ? TitleH : 0) + MainH + (StatCount > 0 ? StatCount * StatH + 6 : 0));
 
     protected override void OnRender(DrawingContext dc)
     {
@@ -542,16 +555,15 @@ public sealed class TrackLimitsView(TelemetryHub hub, TrackLimitsSettings s) : O
         if (s.FlashOnWarning && t < 1.5)
             dc.DrawRectangle(Theme.Brush(stateHex, 0.4 * (1 - t / 1.5)), null, new Rect(size));
 
-        if (s.ShowAccentStripe)
+        if (ShowStripe(s.ShowAccentStripe))
         {
             dc.DrawRectangle(Theme.Brush(s.AccentColor, s.AccentOpacity), null, new Rect(0, 0, w, 3));
             y += 3;
         }
         if (s.ShowTitle)
         {
-            if (Tiles) DrawTile(dc, TileRect(0, y, w, TitleH, 3), s.AccentColor);
-            else dc.DrawRectangle(Theme.Brush("#000000", 0.25), null, new Rect(0, y, w, TitleH));
-            DrawText(dc, s.TitleText ?? "", 11 * fs, text, 12, y + TitleH / 2, heavy: true);
+            if (!Tiles) dc.DrawRectangle(Theme.Brush("#000000", 0.25), null, new Rect(0, y, w, TitleH));
+            DrawText(dc, s.TitleText ?? "", 11 * fs, Tiles ? Theme.Brush(s.AccentColor) : text, 12, y + TitleH / 2, heavy: true);
             y += TitleH;
         }
 
@@ -606,7 +618,7 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
     private double H(double h) => Math.Round(h * Fs);
 
     private double SectionsHeight =>
-        (s.ShowAccentStripe ? 3 : 0) + (s.ShowTitle ? H(24) : 0) +
+        (ShowStripe(s.ShowAccentStripe) ? 3 : 0) + (s.ShowTitle ? H(24) : 0) +
         (s.ShowCurrent ? H(60) : 0) + (s.ShowWheels ? H(40) : 0) +
         (s.ShowWeather ? H(30) : 0) + (s.ShowForecast ? H(44) : 0) +
         (s.ShowOptimalNow ? H(58) : 0) + 4;
@@ -625,12 +637,11 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
         var line = Theme.Brush("#FFFFFF", 0.07);
 
         BeginPanel(dc, size);
-        if (s.ShowAccentStripe) { dc.DrawRectangle(Theme.Brush(s.AccentColor, s.AccentOpacity), null, new Rect(0, 0, w, 3)); y += 3; }
+        if (ShowStripe(s.ShowAccentStripe)) { dc.DrawRectangle(Theme.Brush(s.AccentColor, s.AccentOpacity), null, new Rect(0, 0, w, 3)); y += 3; }
         if (s.ShowTitle)
         {
-            if (Tiles) DrawTile(dc, TileRect(0, y, w, H(24), 3), s.AccentColor);
-            else dc.DrawRectangle(Theme.Brush("#000000", 0.25), null, new Rect(0, y, w, H(24)));
-            DrawText(dc, s.TitleText ?? "", 11 * fs, text, 12, y + H(24) / 2, heavy: true);
+            if (!Tiles) dc.DrawRectangle(Theme.Brush("#000000", 0.25), null, new Rect(0, y, w, H(24)));
+            DrawText(dc, s.TitleText ?? "", 11 * fs, Tiles ? Theme.Brush(s.AccentColor) : text, 12, y + H(24) / 2, heavy: true);
             if (!a.HasData) DrawText(dc, "waiting for data", 10 * fs, muted, w - 12, y + H(24) / 2, TextAlignment.Right);
             y += H(24);
         }
@@ -691,7 +702,7 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
         {
             double h = H(30);
             Divider();
-            DrawText(dc, $"{Names.Weather(a.WeatherNow)} · rain {a.RainNow}%", 12 * fs, text, 12, y + h / 2, heavy: true);
+            DrawText(dc, $"{Names.Weather(a.WeatherNow)} · {a.RainNow}% rain", 12 * fs, text, 12, y + h / 2, heavy: true);
             DrawText(dc, $"track {a.TrackTemp}°C", 11 * fs, muted, w - 12, y + h / 2, TextAlignment.Right);
             y += h;
         }
@@ -835,7 +846,7 @@ public sealed class FpsView(TelemetryHub hub, FpsSettings s, FpsMonitor monitor)
     }
 
     protected override Size ContentSize =>
-        new(W, Math.Max(8, (s.ShowAccentStripe ? 3 : 0) + (HasMain ? MainH : 0) + (s.ShowGraph ? GraphH : 0)));
+        new(W, Math.Max(8, (ShowStripe(s.ShowAccentStripe) ? 3 : 0) + (HasMain ? MainH : 0) + (s.ShowGraph ? GraphH : 0)));
 
     private void Refresh()
     {
@@ -863,7 +874,7 @@ public sealed class FpsView(TelemetryHub hub, FpsSettings s, FpsMonitor monitor)
         var muted = Theme.Brush(s.TextColor, 0.6);
 
         BeginPanel(dc, size);
-        if (s.ShowAccentStripe) { dc.DrawRectangle(Theme.Brush(s.AccentColor, s.AccentOpacity), null, new Rect(0, 0, w, 3)); y += 3; }
+        if (ShowStripe(s.ShowAccentStripe)) { dc.DrawRectangle(Theme.Brush(s.AccentColor, s.AccentOpacity), null, new Rect(0, 0, w, 3)); y += 3; }
 
         if (Tiles)
         {
