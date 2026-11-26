@@ -818,7 +818,7 @@ public sealed class ControlWindow : Window
         ("laplog", "Show / hide lap time log", null!),
         ("inputs", "Show / hide inputs", null!),
         ("fps", "Show / hide FPS counter", null!),
-        ("all", "Show / hide all overlays", "Hides everything; press again to bring them all back"),
+        ("all", "Show / hide all overlays", "Hides everything; press again to bring back the ones that were on"),
     ];
 
     private string? _learningKey;
@@ -866,8 +866,21 @@ public sealed class ControlWindow : Window
             case "inputs": SetOverlayEnabled(_inputs, !_inputs.Settings.Enabled); break;
             case "fps": SetOverlayEnabled(_fps, !_fps.Settings.Enabled); break;
             case "all":
-                bool anyShown = AllOverlays.Any(o => o.Settings.Enabled);
-                foreach (var o in AllOverlays) SetOverlayEnabled(o, !anyShown, refresh: false);
+                var overlays = AllOverlays;
+                var shown = Enumerable.Range(0, overlays.Length).Where(i => overlays[i].Settings.Enabled).ToList();
+                if (shown.Count > 0)
+                {
+                    // Hide everything, remembering what was on so the next press brings back exactly that.
+                    _settings.RestoreAfterHideAll = shown;
+                    foreach (int i in shown) SetOverlayEnabled(overlays[i], false, refresh: false);
+                }
+                else
+                {
+                    var restore = _settings.RestoreAfterHideAll is { Count: > 0 } r ? r : Enumerable.Range(0, overlays.Length).ToList();
+                    foreach (int i in restore.Where(i => i >= 0 && i < overlays.Length)) SetOverlayEnabled(overlays[i], true, refresh: false);
+                    _settings.RestoreAfterHideAll = null;
+                }
+                RequestSave();
                 RefreshOverlayPage();
                 break;
         }

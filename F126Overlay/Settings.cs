@@ -195,7 +195,10 @@ public sealed class Settings
     public FpsSettings Fps { get; set; } = new();
 
     /// <summary>Wheel/controller button flag per action key (0 = not bound). Default: UDP Action 1 switches limits/tyres.</summary>
-    public Dictionary<string, uint> WheelButtons { get; set; } = new() { ["swap"] = 0x00100000 };
+    public Dictionary<string, uint> WheelButtons { get; set; } = new() { ["swap"] = 0x00100000, ["all"] = 0x00200000 };
+
+    /// <summary>Overlays (by index) that "hide all" turned off, so the next press restores them.</summary>
+    public List<int>? RestoreAfterHideAll { get; set; }
 
     private static readonly string Dir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "F126Overlay");
@@ -214,6 +217,9 @@ public sealed class Settings
                 s.Tyres ??= new();
                 s.Fps ??= new();
                 s.WheelButtons ??= new();
+                // Default: UDP Action 2 hides/shows all overlays, unless that button is already used for something.
+                if (!s.WheelButtons.ContainsKey("all") && !s.WheelButtons.ContainsValue(0x00200000))
+                    s.WheelButtons["all"] = 0x00200000;
                 return s;
             }
         }
