@@ -128,13 +128,25 @@ public sealed class OverlayWindow : Window
         BeginAnimation(OpacityProperty, a);
     }
 
-    public void ResetPosition()
+    public OverlaySettings Settings => _settings;
+
+    public void ResetPosition() => ResetPosition(_defaultPos, remember: false);
+
+    /// <summary>Slides the overlay to <paramref name="target"/>; with remember=true the spot is saved.</summary>
+    public void ResetPosition(Point target, bool remember)
     {
-        _settings.Position = null;
-        var anim = new DoubleAnimation(_defaultPos.X, Theme.Ms(350)) { EasingFunction = Anim.Out };
-        anim.Completed += (_, _) => { BeginAnimation(LeftProperty, null); Left = _defaultPos.X; };
-        var animY = new DoubleAnimation(_defaultPos.Y, Theme.Ms(350)) { EasingFunction = Anim.Out };
-        animY.Completed += (_, _) => { BeginAnimation(TopProperty, null); Top = _defaultPos.Y; };
+        _settings.Position = remember ? [target.X, target.Y] : null;
+        if (!IsVisible)
+        {
+            BeginAnimation(LeftProperty, null); BeginAnimation(TopProperty, null);
+            Left = target.X; Top = target.Y;
+            _save();
+            return;
+        }
+        var anim = new DoubleAnimation(target.X, Theme.Ms(350)) { EasingFunction = Anim.Out };
+        anim.Completed += (_, _) => { BeginAnimation(LeftProperty, null); Left = target.X; };
+        var animY = new DoubleAnimation(target.Y, Theme.Ms(350)) { EasingFunction = Anim.Out };
+        animY.Completed += (_, _) => { BeginAnimation(TopProperty, null); Top = target.Y; };
         BeginAnimation(LeftProperty, anim);
         BeginAnimation(TopProperty, animY);
         _save();

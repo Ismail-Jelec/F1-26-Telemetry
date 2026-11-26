@@ -154,6 +154,8 @@ public sealed class ControlWindow : Window
                 foreach (var overlay in new[] { _lapLog, _inputs, _limits, _tyres })
                     if (!OverlayOnMonitor(overlay, targetDisplay)) overlay.MoveToMonitor(targetDisplay);
 
+            PlaceNewOverlaysOnGameScreen();
+
             if (_settings.LapLog.Enabled) _lapLog.FadeIn();
             if (_settings.Inputs.Enabled) _inputs.FadeIn();
             if (_settings.TrackLimits.Enabled) _limits.FadeIn();
@@ -724,7 +726,7 @@ public sealed class ControlWindow : Window
             _settings.TrackLimits.ResetToDefaults();
             _settings.Tyres.ResetToDefaults();
             _lapLog.ApplyAppearance(); _inputs.ApplyAppearance(); _limits.ApplyAppearance(); _tyres.ApplyAppearance();
-            _lapLog.ResetPosition(); _inputs.ResetPosition(); _limits.ResetPosition(); _tyres.ResetPosition();
+            foreach (var o in AllOverlays) ResetOnGameScreen(o);
             if (!lapOn) _lapLog.FadeIn();
             if (!inOn) _inputs.FadeIn();
             if (!limOn) _limits.FadeIn();
@@ -773,6 +775,48 @@ public sealed class ControlWindow : Window
             Foreground = Theme.B(Theme.Muted), FontSize = 12, TextWrapping = TextWrapping.Wrap
         };
         return Card("Display / monitor", "Choose which screen shows your overlays.", selector, hint);
+    }
+
+    private OverlayWindow[] AllOverlays => [_lapLog, _inputs, _limits, _tyres];
+
+    /// <summary>
+    /// The screen you play on: the monitor picked in General, otherwise the screen where your
+    /// positioned overlays already are, otherwise the main screen.
+    /// </summary>
+    private Screen GameScreen()
+    {
+        var chosen = Screen.AllScreens.FirstOrDefault(m => m.DeviceName == _settings.MonitorDeviceName);
+        if (chosen != null) return chosen;
+        var anchor = AllOverlays.FirstOrDefault(o => o.Settings.Position != null);
+        if (anchor?.Settings.Position is { Length: 2 } p)
+        {
+            var dpi = VisualTreeHelper.GetDpi(this);
+            return Screen.FromPoint(new System.Drawing.Point((int)(p[0] * dpi.DpiScaleX) + 20, (int)(p[1] * dpi.DpiScaleY) + 20));
+        }
+        return Screen.PrimaryScreen ?? Screen.AllScreens[0];
+    }
+
+    /// <summary>Default spot for each overlay on the game screen, in WPF units.</summary>
+    private Point DefaultSpot(OverlayWindow o, Screen screen)
+    {
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var wa = screen.WorkingArea;
+        double left = wa.Left / dpi.DpiScaleX, top = wa.Top / dpi.DpiScaleY;
+        double width = wa.Width / dpi.DpiScaleX, height = wa.Height / dpi.DpiScaleY;
+        if (o == _lapLog) return new Point(left + width - 300, top + 120);
+        if (o == _inputs) return new Point(left + width / 2 - 140, top + height - 130);
+        if (o == _limits) return new Point(left + 40, top + 120);
+        return new Point(left + 40, top + Math.Max(320, height * 0.38)); // tyre strategy: left side, under track limits
+    }
+
+    private void ResetOnGameScreen(OverlayWindow o) => o.ResetPosition(DefaultSpot(o, GameScreen()), remember: true);
+
+    /// <summary>Overlays you haven't placed yet (e.g. a newly added one) start on the same screen as the others.</summary>
+    private void PlaceNewOverlaysOnGameScreen()
+    {
+        if (AllOverlays.All(o => o.Settings.Position == null) && _settings.MonitorDeviceName == null) return; // first run: defaults are fine
+        foreach (var o in AllOverlays)
+            if (o.Settings.Position == null) ResetOnGameScreen(o);
     }
 
     private static bool OverlayOnMonitor(OverlayWindow overlay, Screen target)
@@ -910,7 +954,7 @@ public sealed class ControlWindow : Window
     private Border PositionCard(OverlayWindow w)
     {
         var reset = new PillButton("Reset position");
-        reset.Click += w.ResetPosition;
+        reset.Click += () => ResetOnGameScreen(w);
         var unlock = new PillButton(_settings.Locked ? "Unlock to move" : "Lock in place", primary: _settings.Locked);
         unlock.Click += () =>
         {
