@@ -130,7 +130,10 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
             TextAlignment.Center => x - ft.Width / 2,
             _ => x,
         };
-        var origin = new Point(Math.Round(left), Math.Round(yCenter - ft.Height / 2));
+        // Centre on the visible ink, not the line box: digits have no descenders, so centring the line
+        // box (which reserves room below the baseline) made big numbers sit too high.
+        double top = ft.Extent > 0 ? yCenter - ft.OverhangLeading - ft.Extent / 2 : yCenter - ft.Height / 2;
+        var origin = new Point(Math.Round(left), Math.Round(top));
         // Faint text (placeholders, hints) stays without an outline; it would only add noise.
         if (_base.TextOutline && !(brush is SolidColorBrush sb && sb.Color.A < 128))
         {
