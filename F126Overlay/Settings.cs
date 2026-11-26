@@ -111,6 +111,43 @@ public sealed class TrackLimitsSettings : OverlaySettings
     public bool FlashOnWarning { get; set; } = true;
 }
 
+public sealed class TyreStrategySettings : OverlaySettings
+{
+    public TyreStrategySettings() { CornerRadius = 8; }
+
+    // Layout
+    public double Width { get; set; } = 290;
+    public double TextScale { get; set; } = 1.0;
+
+    // Strategy
+    public double PitWearThreshold { get; set; } = 70;
+    public int ForecastCount { get; set; } = 4;
+
+    // Content
+    public bool ShowAccentStripe { get; set; } = true;
+    public bool ShowTitle { get; set; } = true;
+    public string TitleText { get; set; } = "TYRE STRATEGY";
+    public bool ShowCurrent { get; set; } = true;
+    public bool ShowWheels { get; set; } = true;
+    public bool ShowWeather { get; set; } = true;
+    public bool ShowForecast { get; set; } = true;
+    public bool ShowOptimalNow { get; set; } = true;
+    public bool ShowNextStop { get; set; } = true;
+
+    // Colours
+    public string AccentColor { get; set; } = "#E10600";
+    public string TextColor { get; set; } = "#FFFFFF";
+    public string SoftColor { get; set; } = "#FF2E2E";
+    public string MediumColor { get; set; } = "#FFD400";
+    public string HardColor { get; set; } = "#F2F2F2";
+    public string InterColor { get; set; } = "#2BD34F";
+    public string WetColor { get; set; } = "#2F7BFF";
+    public string AlertColor { get; set; } = "#FF8700";
+
+    // Effects
+    public bool PulseOnChange { get; set; } = true;
+}
+
 /// <summary>User settings, saved as JSON in %AppData%\F126Overlay\settings.json.</summary>
 public sealed class Settings
 {
@@ -122,6 +159,7 @@ public sealed class Settings
     public LapLogSettings LapLog { get; set; } = new();
     public InputsSettings Inputs { get; set; } = new();
     public TrackLimitsSettings TrackLimits { get; set; } = new();
+    public TyreStrategySettings Tyres { get; set; } = new();
 
     private static readonly string Dir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "F126Overlay");
@@ -137,6 +175,7 @@ public sealed class Settings
                 s.LapLog ??= new();
                 s.Inputs ??= new();
                 s.TrackLimits ??= new();
+                s.Tyres ??= new();
                 return s;
             }
         }
@@ -186,7 +225,7 @@ public sealed record OverlayTheme(
 
     public void ApplyTo(Settings s)
     {
-        foreach (OverlaySettings o in new OverlaySettings[] { s.LapLog, s.Inputs, s.TrackLimits })
+        foreach (OverlaySettings o in new OverlaySettings[] { s.LapLog, s.Inputs, s.TrackLimits, s.Tyres })
         {
             o.BackgroundColor = Background;
             o.FontFamily = Font;
@@ -199,5 +238,6 @@ public sealed record OverlayTheme(
         i.GearColor = Gear; i.SpeedColor = Text; i.ThrottleColor = Throttle; i.BrakeColor = Brake;
         var t = s.TrackLimits;
         t.AccentColor = Accent; t.TextColor = Text; t.OkColor = Throttle; t.DangerColor = Brake;
+        s.Tyres.AccentColor = Accent; s.Tyres.TextColor = Text;
     }
 }

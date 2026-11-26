@@ -29,6 +29,13 @@ public static class Spec
     public const int CarStatusPacketSize = 1445;
     public const int SessionPacketSize = 926;
     public const int CarTelemetry2PacketSize = 269;
+
+    public const int CarDamageSize = 46;
+    public const int CarDamagePacketSize = 1133;   // 29 + 24 * 46
+    public const int TyreSetSize = 10;
+    public const int MaxTyreSets = 20;
+    public const int TyreSetsPacketSize = 231;     // 29 + 1 + 20 * 10 + 1
+    public const int MaxForecastSamples = 64;
 }
 
 /// <summary>Little-endian cursor over a byte array.</summary>
@@ -189,23 +196,110 @@ public sealed class CarTelemetry2
     }
 }
 
+public readonly record struct WeatherSample(
+    byte SessionType, byte TimeOffsetMin, byte Weather, sbyte TrackTemp, sbyte AirTemp, byte RainPercent);
+
 public sealed class SessionInfo
 {
-    public byte Weather;
+    public byte Weather;                 // 0 clear, 1 light cloud, 2 overcast, 3 light rain, 4 heavy rain, 5 storm
     public sbyte TrackTemp, AirTemp;
     public byte TotalLaps;
     public ushort TrackLength;
     public byte SessionType;
     public sbyte TrackId;
+    public ushort SessionTimeLeft;
+    public byte SafetyCarStatus;
+    public byte ForecastAccuracy;        // 0 perfect, 1 approximate
+    public byte PitWindowIdealLap, PitWindowLatestLap, PitRejoinPosition;
+    public WeatherSample[] Forecast = [];
 
-    /// <summary>Reads the opening fields of a Session packet (id 1).</summary>
+    /// <summary>Reads a Session packet (id 1) up to the pit window fields.</summary>
     public static SessionInfo Read(ReadOnlySpan<byte> d)
     {
         var r = new PacketReader(d, Spec.HeaderSize);
-        return new SessionInfo
+        var s = new SessionInfo
         {
             Weather = r.U8(), TrackTemp = r.I8(), AirTemp = r.I8(), TotalLaps = r.U8(),
             TrackLength = r.U16(), SessionType = r.U8(), TrackId = r.I8(),
         };
+        r.Skip(1);                       // formula
+        s.SessionTimeLeft = r.U16();
+        r.Skip(2 + 1 + 1 + 1 + 1 + 1);   // duration, pit speed limit, paused, spectating, spectator idx, SLI Pro
+        r.Skip(1 + 21 * 5);              // marshal zones
+        s.SafetyCarStatus = r.U8();
+        r.Skip(1);                       // network game
+        int n = Math.Min((int)r.U8(), Spec.MaxForecastSamples);
+        var samples = new WeatherSample[n];
+        int start = r.Pos;
+        for (int i = 0; i < n; i++)
+        {
+            var w = new PacketReader(d, start + i * 8);
+            byte type = w.U8(), offset = w.U8(), weather = w.U8();
+            sbyte track = w.I8(); w.Skip(1);
+            sbyte air = w.I8(); w.Skip(1);
+            samples[i] = new WeatherSample(type, offset, weather, track, air, w.U8());
+        }
+        s.Forecast = samples;
+        r.Pos = start + Spec.MaxForecastSamples * 8;
+        s.ForecastAccuracy = r.U8();
+        r.Skip(1 + 4 + 4 + 4);           // AI difficulty, link identifiers
+        s.PitWindowIdealLap = r.U8();
+        s.PitWindowLatestLap = r.U8();
+        s.PitRejoinPosition = r.U8();
+        return s;
+    }
+}
+
+public sealed class CarDamage
+{
+    public readonly float[] TyresWear = new float[4];   // percent, RL RR FL FR
+    public readonly byte[] TyresDamage = new byte[4];
+    public readonly byte[] TyreBlisters = new byte[4];
+
+    public float MaxWear => Math.Max(Math.Max(TyresWear[0], TyresWear[1]), Math.Max(TyresWear[2], TyresWear[3]));
+
+    /// <summary>Reads the given car's entry from a Car Damage packet (id 10).</summary>
+    public static CarDamage Read(ReadOnlySpan<byte> d, int carIndex)
+    {
+        var r = new PacketReader(d, Spec.HeaderSize + carIndex * Spec.CarDamageSize);
+        var c = new CarDamage();
+        for (int i = 0; i < 4; i++) c.TyresWear[i] = r.F32();
+        for (int i = 0; i < 4; i++) c.TyresDamage[i] = r.U8();
+        r.Skip(4); // brakes damage
+        for (int i = 0; i < 4; i++) c.TyreBlisters[i] = r.U8();
+        return c;
+    }
+}
+
+public readonly record struct TyreSet(
+    int Index, byte ActualCompound, byte VisualCompound, byte Wear, bool Available, byte RecommendedSession,
+    byte LifeSpan, byte UsableLife, short LapDeltaMs, bool Fitted)
+{
+    public bool IsWet => VisualCompound is 7 or 8;
+}
+
+public sealed class TyreSets
+{
+    public byte CarIndex;
+    public TyreSet[] Sets = [];
+    public byte FittedIndex;
+
+    /// <summary>Reads a Tyre Sets packet (id 12). Only sent for the player's car(s).</summary>
+    public static TyreSets Read(ReadOnlySpan<byte> d)
+    {
+        var r = new PacketReader(d, Spec.HeaderSize);
+        var t = new TyreSets { CarIndex = r.U8() };
+        var sets = new List<TyreSet>(Spec.MaxTyreSets);
+        for (int i = 0; i < Spec.MaxTyreSets; i++)
+        {
+            byte actual = r.U8(), visual = r.U8(), wear = r.U8(), available = r.U8(), rec = r.U8(), life = r.U8(), usable = r.U8();
+            short delta = r.I16();
+            byte fitted = r.U8();
+            if (visual == 0 && actual == 0) continue; // empty slot
+            sets.Add(new TyreSet(i, actual, visual, wear, available != 0, rec, life, usable, delta, fitted != 0));
+        }
+        t.Sets = sets.ToArray();
+        t.FittedIndex = r.U8();
+        return t;
     }
 }

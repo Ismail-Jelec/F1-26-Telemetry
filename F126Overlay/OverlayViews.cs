@@ -533,3 +533,196 @@ public sealed class TrackLimitsView(TelemetryHub hub, TrackLimitsSettings s) : O
         EndPanel(dc, size);
     }
 }
+
+/// <summary>Tyre strategy: current tyre and wear, weather + forecast, optimal tyre now, and the next stop.</summary>
+public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) : OverlayView(hub, s)
+{
+    private double W => Math.Round(Math.Clamp(s.Width, 230, 420));
+    private double Fs => Math.Clamp(s.TextScale, 0.6, 1.8);
+    private double H(double h) => Math.Round(h * Fs);
+
+    private double SectionsHeight =>
+        (s.ShowAccentStripe ? 3 : 0) + (s.ShowTitle ? H(24) : 0) +
+        (s.ShowCurrent ? H(60) : 0) + (s.ShowWheels ? H(40) : 0) +
+        (s.ShowWeather ? H(30) : 0) + (s.ShowForecast ? H(44) : 0) +
+        (s.ShowOptimalNow ? H(58) : 0) + (s.ShowNextStop ? H(84) : 0) + 4;
+
+    protected override Size ContentSize => new(W, SectionsHeight);
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        TyreAdvice a;
+        lock (Hub.Sync) a = TyreAdvisor.Advise(Hub, Math.Clamp(s.PitWearThreshold, 30, 95));
+
+        var size = ContentSize;
+        double w = W, fs = Fs, y = 0;
+        var text = Theme.Brush(s.TextColor);
+        var muted = Theme.Brush(s.TextColor, 0.6);
+        var line = Theme.Brush("#FFFFFF", 0.07);
+
+        BeginPanel(dc, size);
+        if (s.ShowAccentStripe) { dc.DrawRectangle(Theme.Brush(s.AccentColor), null, new Rect(0, 0, w, 3)); y += 3; }
+        if (s.ShowTitle)
+        {
+            dc.DrawRectangle(Theme.Brush("#000000", 0.25), null, new Rect(0, y, w, H(24)));
+            DrawText(dc, s.TitleText ?? "", 11 * fs, text, 12, y + H(24) / 2, heavy: true);
+            if (!a.HasData) DrawText(dc, "waiting for data", 10 * fs, muted, w - 12, y + H(24) / 2, TextAlignment.Right);
+            y += H(24);
+        }
+
+        void Divider() => dc.DrawRectangle(line, null, new Rect(10, y, w - 20, 1));
+
+        // Current tyre
+        if (s.ShowCurrent)
+        {
+            double h = H(60), cy = y + h / 2;
+            DrawChip(dc, 12 + 18 * fs, cy, 18 * fs, a.FittedVisual);
+            double tx = 12 + 44 * fs;
+            DrawText(dc, CompoundName(a.FittedVisual), 14 * fs, text, tx, cy - 9 * fs, heavy: true);
+            DrawText(dc, $"{a.TyreAge} laps old · wear {a.MaxWear:0}%", 11 * fs, muted, tx, cy + 10 * fs);
+
+            string left = a.LapsLeftOnTyre is double l ? (l >= 99 ? "99+" : $"{l:0}") : "–";
+            var wearHex = a.MaxWear >= s.PitWearThreshold ? s.SoftColor : a.MaxWear >= s.PitWearThreshold * 0.75 ? s.MediumColor : s.InterColor;
+            DrawText(dc, left, 24 * fs, Theme.Brush(wearHex), w - 12, cy - 6 * fs, TextAlignment.Right, heavy: true);
+            DrawText(dc, "laps left", 10 * fs, muted, w - 12, cy + 14 * fs, TextAlignment.Right);
+            y += h;
+        }
+
+        // Wear per wheel
+        if (s.ShowWheels)
+        {
+            double h = H(40);
+            Divider();
+            string[] labels = ["FL", "FR", "RL", "RR"];
+            int[] idx = [2, 3, 0, 1]; // wear array is RL, RR, FL, FR
+            double cellW = (w - 24) / 4;
+            for (int i = 0; i < 4; i++)
+            {
+                float v = a.Wear[idx[i]];
+                double x = 12 + i * cellW;
+                DrawText(dc, labels[i], 9 * fs, muted, x, y + h * 0.3);
+                DrawText(dc, $"{v:0}%", 12 * fs, text, x + cellW - 6, y + h * 0.3, TextAlignment.Right, heavy: true);
+                var bar = new Rect(x, y + h * 0.62, cellW - 6, 4 * fs);
+                dc.DrawRoundedRectangle(Theme.Brush("#FFFFFF", 0.1), null, bar, 2, 2);
+                double fill = bar.Width * Math.Clamp(v / 100.0, 0, 1);
+                var hex = v >= s.PitWearThreshold ? s.SoftColor : v >= s.PitWearThreshold * 0.75 ? s.MediumColor : s.InterColor;
+                if (fill > 0.5) dc.DrawRoundedRectangle(Theme.Brush(hex), null, new Rect(bar.X, bar.Y, fill, bar.Height), 2, 2);
+            }
+            y += h;
+        }
+
+        // Weather now
+        if (s.ShowWeather)
+        {
+            double h = H(30);
+            Divider();
+            DrawText(dc, $"{Names.Weather(a.WeatherNow)} · rain {a.RainNow}%", 12 * fs, text, 12, y + h / 2, heavy: true);
+            DrawText(dc, $"track {a.TrackTemp}°C", 11 * fs, muted, w - 12, y + h / 2, TextAlignment.Right);
+            y += h;
+        }
+
+        // Forecast strip
+        if (s.ShowForecast)
+        {
+            double h = H(44);
+            var samples = a.Forecast.Where(f => f.TimeOffsetMin > 0).Take(Math.Clamp(s.ForecastCount, 1, 8)).ToArray();
+            if (samples.Length == 0)
+                DrawText(dc, "No forecast for this session", 11 * fs, muted, 12, y + h / 2);
+            else
+            {
+                double cellW = (w - 24) / samples.Length;
+                for (int i = 0; i < samples.Length; i++)
+                {
+                    var f = samples[i];
+                    var c = TyreAdvisor.ConditionsFor(f.Weather);
+                    var cHex = c == Conditions.Dry ? s.TextColor : c == Conditions.Inter ? s.InterColor : s.WetColor;
+                    var cell = new Rect(12 + i * cellW + 2, y + 4, cellW - 4, h - 8);
+                    dc.DrawRoundedRectangle(Theme.Brush(cHex, c == Conditions.Dry ? 0.06 : 0.16), null, cell, 5, 5);
+                    DrawText(dc, $"+{f.TimeOffsetMin}'", 9 * fs, muted, cell.X + cell.Width / 2, cell.Y + cell.Height * 0.25, TextAlignment.Center);
+                    DrawText(dc, ShortWeather(f.Weather), 10 * fs, Theme.Brush(cHex), cell.X + cell.Width / 2, cell.Y + cell.Height * 0.52, TextAlignment.Center, heavy: true);
+                    DrawText(dc, $"{f.RainPercent}%", 9 * fs, muted, cell.X + cell.Width / 2, cell.Y + cell.Height * 0.8, TextAlignment.Center);
+                }
+            }
+            y += h;
+        }
+
+        // Optimal tyre now
+        if (s.ShowOptimalNow)
+        {
+            double h = H(58), cy = y + h / 2;
+            Divider();
+            if (a.ChangeNow && a.HasData)
+            {
+                double alpha = s.PulseOnChange ? 0.18 + 0.14 * Math.Sin(Now * 5) : 0.25;
+                dc.DrawRectangle(Theme.Brush(s.AlertColor, alpha), null, new Rect(0, y + 1, w, h - 1));
+            }
+            DrawText(dc, "OPTIMAL NOW", 9 * fs, a.ChangeNow ? Theme.Brush(s.AlertColor) : muted, 12, y + H(12), heavy: true);
+            DrawChip(dc, 12 + 13 * fs, cy + 6 * fs, 13 * fs, a.OptimalNowVisual);
+            DrawText(dc, CompoundName(a.OptimalNowVisual), 13 * fs, text, 12 + 32 * fs, cy + 6 * fs - 7 * fs, heavy: true);
+            DrawText(dc, a.NowReason, 10 * fs, a.ChangeNow ? text : muted, 12 + 32 * fs, cy + 6 * fs + 8 * fs);
+            y += h;
+        }
+
+        // Next stop
+        if (s.ShowNextStop)
+        {
+            double h = H(84);
+            Divider();
+            DrawText(dc, "NEXT PIT STOP", 9 * fs, muted, 12, y + H(12), heavy: true);
+            string when = a.NextStopLap is int lapNo
+                ? (lapNo <= a.CurrentLap ? "THIS LAP" : $"Lap {lapNo}  (in {lapNo - a.CurrentLap})")
+                : a.HasData ? "No stop needed" : "–";
+            DrawText(dc, when, 12 * fs, a.NextStopLap is int ln && ln <= a.CurrentLap ? Theme.Brush(s.AlertColor) : text, w - 12, y + H(13), TextAlignment.Right, heavy: true);
+
+            double cy = y + H(42);
+            DrawChip(dc, 12 + 13 * fs, cy, 13 * fs, a.NextStopVisual);
+            DrawText(dc, CompoundName(a.NextStopVisual), 13 * fs, text, 12 + 32 * fs, cy - 7 * fs, heavy: true);
+            string detail = a.NextStopSet is TyreSet set
+                ? $"{(set.Wear == 0 ? "new set" : $"used {set.Wear}%")} · {set.UsableLife} laps life" +
+                  (set.LapDeltaMs != 0 ? $" · {set.LapDeltaMs / 1000.0:+0.0;-0.0}s" : "")
+                : a.NextStopReason;
+            DrawText(dc, detail, 10 * fs, muted, 12 + 32 * fs, cy + 8 * fs);
+
+            string footer = a.WeatherChange ?? (a.NextStopSet != null ? a.NextStopReason : "");
+            if (!string.IsNullOrEmpty(footer))
+            {
+                bool weather = a.WeatherChange != null;
+                DrawText(dc, footer, 10 * fs, weather ? Theme.Brush(s.AlertColor) : muted, 12, y + H(70), heavy: weather);
+            }
+            y += h;
+        }
+
+        EndPanel(dc, size);
+    }
+
+    private string CompoundName(byte visual) => visual switch
+    {
+        TyreAdvisor.Soft => "SOFT", TyreAdvisor.Medium => "MEDIUM", TyreAdvisor.Hard => "HARD",
+        TyreAdvisor.Inter => "INTERMEDIATE", TyreAdvisor.Wet => "WET", 0 => "–", _ => Names.Compound(visual),
+    };
+
+    private string CompoundHex(byte visual) => visual switch
+    {
+        TyreAdvisor.Soft => s.SoftColor, TyreAdvisor.Medium => s.MediumColor, TyreAdvisor.Hard => s.HardColor,
+        TyreAdvisor.Inter => s.InterColor, TyreAdvisor.Wet => s.WetColor, _ => "#8A8A94",
+    };
+
+    private static string Letter(byte visual) => visual switch
+    {
+        TyreAdvisor.Soft => "S", TyreAdvisor.Medium => "M", TyreAdvisor.Hard => "H",
+        TyreAdvisor.Inter => "I", TyreAdvisor.Wet => "W", _ => "?",
+    };
+
+    private static string ShortWeather(byte w) => w switch
+    {
+        0 => "Clear", 1 => "Cloudy", 2 => "Overcast", 3 => "Lt rain", 4 => "Rain", 5 => "Storm", _ => "?",
+    };
+
+    /// <summary>Tyre "chip": dark disc with a coloured sidewall ring and the compound letter.</summary>
+    private void DrawChip(DrawingContext dc, double cx, double cy, double r, byte visual)
+    {
+        var colour = Theme.Brush(CompoundHex(visual));
+        dc.DrawEllipse(Theme.Brush("#0A0A0C"), new Pen(colour, Math.Max(2, r * 0.28)), new Point(cx, cy), r - r * 0.14, r - r * 0.14);
+        DrawText(dc, Letter(visual), r * 0.95, colour, cx, cy, TextAlignment.Center, heavy: true);
+    }
+}

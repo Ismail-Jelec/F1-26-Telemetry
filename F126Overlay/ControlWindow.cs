@@ -31,6 +31,7 @@ public sealed class ControlWindow : Window
     private readonly OverlayWindow _lapLog;
     private readonly OverlayWindow _inputs;
     private readonly OverlayWindow _limits;
+    private readonly OverlayWindow _tyres;
 
     private readonly Border _root;
     private readonly ScaleTransform _rootScale = new(0.96, 0.96);
@@ -40,7 +41,7 @@ public sealed class ControlWindow : Window
     private readonly TextBlock _pageSubtitle = new();
     private readonly List<(NavItem Item, Func<UIElement> Build, string Title, string Subtitle)> _pages = [];
     private int _currentPage;
-    private readonly Dictionary<string, int> _subTab = new() { ["laplog"] = 0, ["inputs"] = 0, ["limits"] = 0 };
+    private readonly Dictionary<string, int> _subTab = new() { ["laplog"] = 0, ["inputs"] = 0, ["limits"] = 0, ["tyres"] = 0 };
     private readonly List<OverlayView> _previews = [];
 
     private readonly Ellipse _liveDot = new() { Width = 8, Height = 8 };
@@ -87,6 +88,8 @@ public sealed class ControlWindow : Window
             new Point(area.Left + area.Width / 2 - 140, area.Bottom - 130), RequestSave);
         _limits = new OverlayWindow("Track limits", new TrackLimitsView(hub, settings.TrackLimits), settings.TrackLimits,
             new Point(area.Left + 40, area.Top + 120), RequestSave);
+        _tyres = new OverlayWindow("Tyre strategy", new TyreStrategyView(hub, settings.Tyres), settings.Tyres,
+            new Point(area.Right - 330, area.Bottom - 520), RequestSave);
 
         // Window shell
         _root = new Border
@@ -134,7 +137,8 @@ public sealed class ControlWindow : Window
         _pages.Add((null!, BuildLapLogPage, "Lap time log", "Personal best, session best and your latest laps"));
         _pages.Add((null!, BuildInputsPage, "Inputs", "Gear, speed and a live throttle / brake trace"));
         _pages.Add((null!, BuildTrackLimitsPage, "Track limits", "Corner-cutting warnings, invalid laps and penalties"));
-        _pages.Add((null!, BuildThemesPage, "Themes", "One-click looks for both overlays"));
+        _pages.Add((null!, BuildTyresPage, "Tyre strategy", "Best tyre for wear and weather, and your next stop"));
+        _pages.Add((null!, BuildThemesPage, "Themes", "One-click looks for all overlays"));
         _pages.Add((null!, BuildGeneralPage, "General", "Locking, lap logging, demo data and reset"));
         BuildNav();
 
@@ -147,15 +151,17 @@ public sealed class ControlWindow : Window
             // Restore the chosen display, even if overlay coordinates were saved elsewhere.
             var targetDisplay = Screen.AllScreens.FirstOrDefault(m => m.DeviceName == _settings.MonitorDeviceName);
             if (targetDisplay != null)
-                foreach (var overlay in new[] { _lapLog, _inputs, _limits })
+                foreach (var overlay in new[] { _lapLog, _inputs, _limits, _tyres })
                     if (!OverlayOnMonitor(overlay, targetDisplay)) overlay.MoveToMonitor(targetDisplay);
 
             if (_settings.LapLog.Enabled) _lapLog.FadeIn();
             if (_settings.Inputs.Enabled) _inputs.FadeIn();
             if (_settings.TrackLimits.Enabled) _limits.FadeIn();
+            if (_settings.Tyres.Enabled) _tyres.FadeIn();
             _lapLog.SetLocked(_settings.Locked);
             _inputs.SetLocked(_settings.Locked);
             _limits.SetLocked(_settings.Locked);
+            _tyres.SetLocked(_settings.Locked);
             SelectPage(0);
         };
         Closing += OnClosing;
@@ -218,7 +224,7 @@ public sealed class ControlWindow : Window
 
     private void BuildNav()
     {
-        string[] icons = ["\uE823", "\uE7FC", "\uE7BA", "\uE790", "\uE713"];
+        string[] icons = ["\uE823", "\uE7FC", "\uE7BA", "\uE9CA", "\uE790", "\uE713"];
         for (int i = 0; i < _pages.Count; i++)
         {
             int index = i;
@@ -552,6 +558,70 @@ public sealed class ControlWindow : Window
         ]);
     }
 
+    private UIElement BuildTyresPage()
+    {
+        var s = _settings.Tyres;
+        var w = _tyres;
+        void C() { w.ApplyAppearance(); RequestSave(); }
+
+        return OverlayPage("tyres", s, w, new TyreStrategyView(_hub, s), "Show in game",
+        [
+            ("Strategy", () =>
+            [
+                Card("Pit stop wear", "When a tyre reaches this wear, the overlay counts it as time to box. Many drivers pit around 60-75%.",
+                    RowStacked("Box at tyre wear", MakeSlider(30, 95, 1, s.PitWearThreshold, v => $"{v:0}%", v => { s.PitWearThreshold = v; C(); }))),
+                Card("Forecast", null,
+                    RowStacked("Forecast slots shown", MakeSlider(1, 8, 1, s.ForecastCount, v => $"{v:0}", v => { s.ForecastCount = (int)v; C(); }))),
+                Card("How it decides", "Optimal now: dry tyres in clear/cloudy/overcast weather, intermediates in light rain, full wets in heavy rain or storm, looking 5 minutes ahead. " +
+                    "Next stop: the earliest of your tyres reaching the wear limit (from your wear per lap this stint), a forecast weather change, or the end of the pit window. " +
+                    "For a dry stop it picks the fastest available set that lasts to the end, otherwise the longest-lasting one. It's an estimate, so trust your engineer for the final call."),
+            ]),
+            ("Layout", () =>
+            [
+                Card("Size", "Changes apply live",
+                    RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
+                    RowStacked("Width", MakeSlider(230, 420, 5, s.Width, Px, v => { s.Width = v; C(); })),
+                    RowStacked("Text size", MakeSlider(0.6, 1.8, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); })),
+                    RowStacked("Corner radius", MakeSlider(0, 24, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
+                TransparencyCard(s, C),
+                FontCard(s, C),
+                PositionCard(w),
+            ]),
+            ("Content", () =>
+            [
+                Card("Sections", "Turn parts of the panel on or off",
+                    RowInline("Accent stripe", null, Switch(s.ShowAccentStripe, on => { s.ShowAccentStripe = on; C(); })),
+                    RowInline("Title bar", null, Switch(s.ShowTitle, on => { s.ShowTitle = on; C(); })),
+                    RowInline("Title text", null, TextInput(s.TitleText, t => { s.TitleText = t; C(); })),
+                    RowInline("Current tyre", "Compound, age, wear and laps left", Switch(s.ShowCurrent, on => { s.ShowCurrent = on; C(); })),
+                    RowInline("Wear per wheel", "FL / FR / RL / RR", Switch(s.ShowWheels, on => { s.ShowWheels = on; C(); })),
+                    RowInline("Weather now", null, Switch(s.ShowWeather, on => { s.ShowWeather = on; C(); })),
+                    RowInline("Forecast", "Upcoming weather and rain chance", Switch(s.ShowForecast, on => { s.ShowForecast = on; C(); })),
+                    RowInline("Optimal tyre now", null, Switch(s.ShowOptimalNow, on => { s.ShowOptimalNow = on; C(); })),
+                    RowInline("Next pit stop", "Lap and tyre for your next stop", Switch(s.ShowNextStop, on => { s.ShowNextStop = on; C(); }))),
+            ]),
+            ("Colours", () =>
+            [
+                Card("Panel", null,
+                    RowStacked("Background", Colour(s.BackgroundColor, c => { s.BackgroundColor = c; C(); })),
+                    RowStacked("Accent stripe", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
+                    RowStacked("Text", Colour(s.TextColor, c => { s.TextColor = c; C(); })),
+                    RowStacked("Alerts (box now, weather change)", Colour(s.AlertColor, c => { s.AlertColor = c; C(); }))),
+                Card("Tyre compounds", null,
+                    RowStacked("Soft", Colour(s.SoftColor, c => { s.SoftColor = c; C(); })),
+                    RowStacked("Medium", Colour(s.MediumColor, c => { s.MediumColor = c; C(); })),
+                    RowStacked("Hard", Colour(s.HardColor, c => { s.HardColor = c; C(); })),
+                    RowStacked("Intermediate", Colour(s.InterColor, c => { s.InterColor = c; C(); })),
+                    RowStacked("Wet", Colour(s.WetColor, c => { s.WetColor = c; C(); }))),
+            ]),
+            ("Effects", () =>
+            [
+                Card("Animations", null,
+                    RowInline("Pulse when you should change tyres", "The 'optimal now' row glows when your tyre doesn't match the conditions", Switch(s.PulseOnChange, on => { s.PulseOnChange = on; C(); }))),
+            ]),
+        ]);
+    }
+
     // ───────────────────────────── themes & general ─────────────────────────────
 
     private UIElement BuildThemesPage()
@@ -606,6 +676,7 @@ public sealed class ControlWindow : Window
                 _lapLog.ApplyAppearance();
                 _inputs.ApplyAppearance();
                 _limits.ApplyAppearance();
+                _tyres.ApplyAppearance();
                 RequestSave();
                 ShowToast($"{theme.Name} applied");
             };
@@ -647,16 +718,18 @@ public sealed class ControlWindow : Window
         var reset = new PillButton("Reset all settings");
         reset.Click += () =>
         {
-            bool lapOn = _settings.LapLog.Enabled, inOn = _settings.Inputs.Enabled, limOn = _settings.TrackLimits.Enabled;
+            bool lapOn = _settings.LapLog.Enabled, inOn = _settings.Inputs.Enabled, limOn = _settings.TrackLimits.Enabled, tyOn = _settings.Tyres.Enabled;
             _settings.LapLog.ResetToDefaults();
             _settings.Inputs.ResetToDefaults();
             _settings.TrackLimits.ResetToDefaults();
-            _lapLog.ApplyAppearance(); _inputs.ApplyAppearance(); _limits.ApplyAppearance();
-            _lapLog.ResetPosition(); _inputs.ResetPosition(); _limits.ResetPosition();
+            _settings.Tyres.ResetToDefaults();
+            _lapLog.ApplyAppearance(); _inputs.ApplyAppearance(); _limits.ApplyAppearance(); _tyres.ApplyAppearance();
+            _lapLog.ResetPosition(); _inputs.ResetPosition(); _limits.ResetPosition(); _tyres.ResetPosition();
             if (!lapOn) _lapLog.FadeIn();
             if (!inOn) _inputs.FadeIn();
             if (!limOn) _limits.FadeIn();
-            _subTab["laplog"] = _subTab["inputs"] = _subTab["limits"] = 0;
+            if (!tyOn) _tyres.FadeIn();
+            _subTab["laplog"] = _subTab["inputs"] = _subTab["limits"] = _subTab["tyres"] = 0;
             RequestSave();
             ShowToast("Everything reset to default");
         };
@@ -687,7 +760,7 @@ public sealed class ControlWindow : Window
         {
             if (selector.SelectedIndex < 0 || selector.SelectedIndex >= screens.Length) return;
             var chosen = screens[selector.SelectedIndex];
-            foreach (var overlay in new[] { _lapLog, _inputs, _limits })
+            foreach (var overlay in new[] { _lapLog, _inputs, _limits, _tyres })
                 overlay.MoveToMonitor(chosen);
             _settings.MonitorDeviceName = chosen.DeviceName;
             RequestSave();
@@ -695,7 +768,7 @@ public sealed class ControlWindow : Window
         };
         var hint = new TextBlock
         {
-            Text = "Moves all three overlays to this display. The choice is saved for next time. " +
+            Text = "Moves all overlays to this display. The choice is saved for next time. " +
                    "Use the resolution to identify your cockpit monitor.",
             Foreground = Theme.B(Theme.Muted), FontSize = 12, TextWrapping = TextWrapping.Wrap
         };
@@ -720,6 +793,7 @@ public sealed class ControlWindow : Window
         _lapLog.SetLocked(on);
         _inputs.SetLocked(on);
         _limits.SetLocked(on);
+        _tyres.SetLocked(on);
         RequestSave();
     }
 
@@ -936,6 +1010,7 @@ public sealed class ControlWindow : Window
         if (_lapLog.IsVisible) _lapLog.View.InvalidateVisual();
         if (_inputs.IsVisible) _inputs.View.InvalidateVisual();
         if (_limits.IsVisible) _limits.View.InvalidateVisual();
+        if (_tyres.IsVisible) _tyres.View.InvalidateVisual();
         if (WindowState != WindowState.Minimized)
             foreach (var p in _previews) { p.InvalidateMeasure(); p.InvalidateVisual(); }
     }
@@ -977,6 +1052,7 @@ public sealed class ControlWindow : Window
         _lapLog.FadeOut();
         _inputs.FadeOut();
         _limits.FadeOut();
+        _tyres.FadeOut();
         var fade = new DoubleAnimation(0, Theme.Ms(180)) { EasingFunction = Anim.Out };
         fade.Completed += (_, _) => Dispatcher.BeginInvoke(new Action(Close));
         _root.BeginAnimation(OpacityProperty, fade);

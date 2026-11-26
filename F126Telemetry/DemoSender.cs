@@ -53,7 +53,12 @@ public static class DemoSender
             frame++;
             var hdr = (PacketId id) => new Header(id, uid, sessionTime, frame);
 
-            if (frame % 60 == 1) Send(udp, target, BuildSession(hdr(PacketId.Session)));
+            if (frame % 60 == 1)
+            {
+                Send(udp, target, BuildSession(hdr(PacketId.Session), sessionTime));
+                Send(udp, target, BuildTyreSets(hdr(PacketId.TyreSets)));
+            }
+            if (frame % 6 == 1) Send(udp, target, BuildDamage(hdr(PacketId.CarDamage), totalDist / TrackLength));
             // Every third lap gets a track-limits warning partway round and is invalidated.
             bool badLap = lapNum % 3 == 0;
             bool cut = badLap && lapDist > TrackLength * 0.4;
@@ -88,9 +93,55 @@ public static class DemoSender
         public Writer At(int pos) { Pos = pos; return this; }
     }
 
-    private static byte[] BuildSession(Header h) =>
-        new Writer(Spec.SessionPacketSize).WriteHeader(h)
-            .U8(1).U8(34).U8(22).U8(10).U16((int)TrackLength).U8(18).U8(7).Buf; // Time Trial, Silverstone
+    // Rain arrives four minutes into the demo, so the tyre strategy overlay has something to react to.
+    private const float RainStartsAtMin = 4;
+
+    private static byte Weather(float minute) => minute >= RainStartsAtMin ? (byte)3 : (byte)2;
+    private static byte Rain(float minute) => minute >= RainStartsAtMin ? (byte)75 : minute >= RainStartsAtMin - 2 ? (byte)45 : (byte)20;
+
+    private static byte[] BuildSession(Header h, float sessionTime)
+    {
+        float now = sessionTime / 60f;
+        var w = new Writer(Spec.SessionPacketSize).WriteHeader(h)
+            .U8(Weather(now)).U8(30).U8(21).U8(20).U16((int)TrackLength).U8(15).U8(7); // Race, 20 laps, Silverstone
+
+        // Weather forecast: numSamples at 155, samples (8 bytes each) from 156.
+        byte[] offsets = [0, 2, 5, 10, 15, 30];
+        w.At(155).U8(offsets.Length);
+        foreach (var o in offsets)
+            w.U8(15).U8(o).U8(Weather(now + o)).U8(30).U8(0).U8(21).U8(0).U8(Rain(now + o));
+
+        // Pit window ideal / latest lap at 682.
+        w.At(682).U8(9).U8(13).U8(5);
+        return w.Buf;
+    }
+
+    private static byte[] BuildDamage(Header h, float lapsDriven)
+    {
+        var w = new Writer(Spec.CarDamagePacketSize).WriteHeader(h);
+        float baseWear = 8 + 4.2f * Math.Max(0, lapsDriven);
+        foreach (var k in new[] { 0.92f, 0.95f, 1.0f, 1.04f }) w.F32(Math.Min(100, baseWear * k)); // RL RR FL FR
+        return w.Buf;
+    }
+
+    private static byte[] BuildTyreSets(Header h)
+    {
+        var w = new Writer(Spec.TyreSetsPacketSize).WriteHeader(h).U8(0);
+        // actual, visual, wear, available, recommended session, life span, usable life, lap delta (ms), fitted
+        (int A, int V, int Wear, int Life, int Usable, int Delta, bool Fitted)[] sets =
+        [
+            (18, 17, 8, 22, 20, 0, true),      // medium (fitted)
+            (16, 16, 0, 16, 14, -650, false),  // soft, new
+            (19, 18, 0, 32, 30, 550, false),   // hard, new
+            (18, 17, 34, 22, 11, 180, false),  // medium, used
+            (7, 7, 0, 30, 30, 0, false),       // intermediate
+            (8, 8, 0, 35, 35, 0, false),       // wet
+        ];
+        foreach (var t in sets)
+            w.U8(t.A).U8(t.V).U8(t.Wear).U8(1).U8(15).U8(t.Life).U8(t.Usable).U16((ushort)(short)t.Delta).U8(t.Fitted ? 1 : 0);
+        w.At(Spec.HeaderSize + 1 + Spec.MaxTyreSets * Spec.TyreSetSize).U8(0);
+        return w.Buf;
+    } // Time Trial, Silverstone
 
     private static byte[] BuildLap(Header h, uint last, uint cur, uint s1, uint s2, float dist, float total, int lapNum, byte sector,
         bool invalid, int penalties, int warnings)

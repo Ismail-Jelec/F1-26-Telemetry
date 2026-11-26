@@ -18,6 +18,13 @@ public sealed class TelemetryHub(LapLogger? logger)
     public LapInfo? Lap;
     public CarStatus? Status;
     public SessionInfo? Session;
+    public CarDamage? Damage;
+    public TyreSets? Tyres;
+
+    /// <summary>Tyre wear at the start of the current stint, used to estimate wear per lap.</summary>
+    public float StintStartWear;
+    public float StintStartDistance = float.NaN;
+    public byte StintCompound;
     public ulong SessionUid;
     public DateTime LastPacketUtc = DateTime.MinValue;
     public long PacketCount;
@@ -86,6 +93,16 @@ public sealed class TelemetryHub(LapLogger? logger)
                         Status = CarStatus.Read(data, car);
                         break;
 
+                    case PacketId.CarDamage when data.Length >= Spec.CarDamagePacketSize:
+                        Damage = CarDamage.Read(data, car);
+                        TrackStint();
+                        break;
+
+                    case PacketId.TyreSets when data.Length >= Spec.TyreSetsPacketSize:
+                        var sets = TyreSets.Read(data);
+                        if (sets.CarIndex == car) Tyres = sets;
+                        break;
+
                     case PacketId.CarTelemetry2 when data.Length >= Spec.CarTelemetry2PacketSize:
                         Telemetry2 = CarTelemetry2.Read(data, car);
                         break;
@@ -96,6 +113,34 @@ public sealed class TelemetryHub(LapLogger? logger)
                 // UDP is lossy and layouts may shift with patches: skip a bad packet, never crash.
                 DroppedCount++;
             }
+        }
+    }
+
+    /// <summary>
+    /// Average tyre wear per lap (percent, worst tyre) in the current stint, or null until about half a lap is driven.
+    /// Call while holding Sync.
+    /// </summary>
+    public double? WearPerLap()
+    {
+        if (Damage == null || Lap == null || Session == null || Session.TrackLength == 0 || float.IsNaN(StintStartDistance)) return null;
+        double laps = (Lap.TotalDistance - StintStartDistance) / Session.TrackLength;
+        if (laps < 0.5) return null;
+        double rate = (Damage.MaxWear - StintStartWear) / laps;
+        return rate > 0 ? rate : null;
+    }
+
+    private void TrackStint()
+    {
+        if (Damage == null || Lap == null) return;
+        float wear = Damage.MaxWear;
+        byte compound = Status?.VisualCompound ?? 0;
+        // New stint: first data, a tyre change (wear drops) or a different compound.
+        if (float.IsNaN(StintStartDistance) || wear < StintStartWear - 3 || compound != StintCompound
+            || Lap.TotalDistance < StintStartDistance)
+        {
+            StintStartWear = wear;
+            StintStartDistance = Lap.TotalDistance;
+            StintCompound = compound;
         }
     }
 
@@ -129,6 +174,9 @@ public sealed class TelemetryHub(LapLogger? logger)
         Array.Clear(_carLapNum);
         Array.Clear(_carLapInvalid);
         _traceCount = _traceHead = 0;
+        Damage = null;
+        Tyres = null;
+        StintStartDistance = float.NaN;
     }
 
     /// <summary>Detects completed laps for every car to keep lap history and the session best.</summary>
