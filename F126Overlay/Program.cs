@@ -8,6 +8,13 @@ public static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        int snap = Array.IndexOf(args, "--snapshot");
+        if (snap >= 0)
+        {
+            Snapshot.Run(snap + 1 < args.Length ? args[snap + 1] : "snapshots");
+            return;
+        }
+
         var settings = Settings.Load();
         var logger = settings.LogLaps ? new LapLogger(Settings.LapLogDir) : null;
         var hub = new TelemetryHub(logger);

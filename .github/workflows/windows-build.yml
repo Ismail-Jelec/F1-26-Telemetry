@@ -21,3 +21,14 @@ jobs:
         run: dotnet build F126Overlay/F126Overlay.csproj --configuration Release
       - name: Build telemetry console
         run: dotnet build F126Telemetry/F126Telemetry.csproj --configuration Release
+      - name: Render overlay screenshots
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem F126Overlay/bin/Release -Recurse -Filter F126Overlay.exe | Select-Object -First 1
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList '--snapshot', "$PWD/snapshots" -PassThru -Wait
+          Get-ChildItem snapshots
+          if (-not (Get-ChildItem snapshots -Filter *.png)) { throw "No screenshots were rendered (exit code $($p.ExitCode))" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: overlay-screenshots
+          path: snapshots/*.png

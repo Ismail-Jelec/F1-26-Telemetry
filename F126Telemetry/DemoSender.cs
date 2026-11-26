@@ -16,6 +16,18 @@ public static class DemoSender
     {
         using var udp = new UdpClient();
         var target = new IPEndPoint(IPAddress.Loopback, port);
+        Loop(data => udp.Send(data, data.Length, target), () => !ct.IsCancellationRequested, realtime: true);
+    }
+
+    /// <summary>Runs the simulation as fast as possible for <paramref name="seconds"/> of session time (used for screenshots).</summary>
+    public static void Simulate(Action<byte[]> sink, double seconds)
+    {
+        int frames = (int)(seconds * 60);
+        Loop(sink, () => frames-- > 0, realtime: false);
+    }
+
+    private static void Loop(Action<byte[]> send, Func<bool> keepGoing, bool realtime)
+    {
         var rng = new Random(26);
         ulong uid = (ulong)rng.NextInt64();
         uint frame = 0;
@@ -24,7 +36,7 @@ public static class DemoSender
         uint lapTimeMs = 0, lastLapMs = 0, s1 = 0, s2 = 0;
         const float dt = 1f / 60f;
 
-        while (!ct.IsCancellationRequested)
+        while (keepGoing())
         {
             // Speed profile: fast straights, three slow corners per lap.
             float phase = Math.Max(0, lapDist) / TrackLength * MathF.Tau;
@@ -55,28 +67,27 @@ public static class DemoSender
 
             if (frame % 60 == 1)
             {
-                Send(udp, target, BuildSession(hdr(PacketId.Session), sessionTime));
-                Send(udp, target, BuildTyreSets(hdr(PacketId.TyreSets)));
+                send(BuildSession(hdr(PacketId.Session), sessionTime));
+                send(BuildTyreSets(hdr(PacketId.TyreSets)));
             }
-            if (frame % 6 == 1) Send(udp, target, BuildDamage(hdr(PacketId.CarDamage), totalDist / TrackLength));
+            if (frame % 6 == 1) send(BuildDamage(hdr(PacketId.CarDamage), totalDist / TrackLength));
             // Every third lap gets a track-limits warning partway round and is invalidated.
             bool badLap = lapNum % 3 == 0;
             bool cut = badLap && lapDist > TrackLength * 0.4;
             int warnings = (lapNum - 1) / 3 + (cut ? 1 : 0);
             int penalties = warnings >= 3 ? 5 : 0;
-            Send(udp, target, BuildLap(hdr(PacketId.LapData), lastLapMs, lapTimeMs, s1, s2, lapDist, totalDist, lapNum, sector,
+            send(BuildLap(hdr(PacketId.LapData), lastLapMs, lapTimeMs, s1, s2, lapDist, totalDist, lapNum, sector,
                 cut, penalties, warnings));
-            Send(udp, target, BuildTelemetry(hdr(PacketId.CarTelemetry), (ushort)speed, throttle, steer, brake, gear, rpm));
-            Send(udp, target, BuildStatus(hdr(PacketId.CarStatus), ers, fuel));
-            Send(udp, target, BuildTelemetry2(hdr(PacketId.CarTelemetry2), throttle > 0.95f));
+            send(BuildTelemetry(hdr(PacketId.CarTelemetry), (ushort)speed, throttle, steer, brake, gear, rpm));
+            send(BuildStatus(hdr(PacketId.CarStatus), ers, fuel));
+            send(BuildTelemetry2(hdr(PacketId.CarTelemetry2), throttle > 0.95f));
 
-            Thread.Sleep(16);
+            if (realtime) Thread.Sleep(16);
         }
     }
 
     private readonly record struct Header(PacketId Id, ulong Uid, float Time, uint Frame);
 
-    private static void Send(UdpClient udp, IPEndPoint target, byte[] data) => udp.Send(data, data.Length, target);
 
     private sealed class Writer(int size)
     {

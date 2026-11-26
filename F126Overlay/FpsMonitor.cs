@@ -184,6 +184,19 @@ public sealed class FpsMonitor : IDisposable
         catch { /* process ended */ }
     }
 
+    /// <summary>Adds made-up frames (for screenshots / previews without a game running).</summary>
+    public void AddFakeFrames(string app, IEnumerable<double> frameMs)
+    {
+        long now = Environment.TickCount64;
+        var list = frameMs.ToList();
+        lock (_sync)
+        {
+            if (!_frames.TryGetValue(app, out var q)) _frames[app] = q = new Queue<(long, double)>();
+            long t = now - (long)list.Sum();
+            foreach (var ms in list) { t += (long)ms; q.Enqueue((Math.Min(t, now), ms)); }
+        }
+    }
+
     /// <summary>Process names (with .exe) currently presenting frames, busiest first.</summary>
     public string[] ActiveApps()
     {
