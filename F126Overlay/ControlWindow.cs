@@ -405,6 +405,10 @@ public sealed class ControlWindow : Window
         return page;
     }
 
+    // Every overlay page uses the same tabs in the same order:
+    //   Content (what's shown + data settings) · Layout (size, position) · Style (look, fonts,
+    //   transparency, outline) · Colours · Effects
+
     private UIElement BuildLapLogPage()
     {
         var s = _settings.LapLog;
@@ -413,47 +417,41 @@ public sealed class ControlWindow : Window
 
         return OverlayPage("laplog", s, w, new LapLogView(_hub, s), "Show in game",
         [
+            ("Content", () =>
+            [
+                Card("Sections", "Turn parts of the log on or off",
+                    RowInline("Title", null, Switch(s.ShowTitle, on => { s.ShowTitle = on; C(); })),
+                    RowInline("Title text", null, TitleBox(s, C)),
+                    RowInline("Personal best", "Your fastest valid lap this session", Switch(s.ShowPersonalBest, on => { s.ShowPersonalBest = on; C(); })),
+                    RowInline("Session best", "Fastest valid lap of any car", Switch(s.ShowSessionBest, on => { s.ShowSessionBest = on; C(); })),
+                    RowInline("Column headers", "LAP / TIME / PS. BEST / FUEL", Switch(s.ShowColumnHeaders, on => { s.ShowColumnHeaders = on; C(); }))),
+                Card("Lap list", null,
+                    RowStacked("Laps shown", MakeSlider(3, 20, 1, s.Rows, v => $"{v:0}", v => { s.Rows = (int)v; C(); })),
+                    RowInline("Gap to personal best", "PS. BEST column", Switch(s.ShowDelta, on => { s.ShowDelta = on; C(); })),
+                    RowInline("Fuel", "Fuel left at the end of each lap", Switch(s.ShowFuel, on => { s.ShowFuel = on; C(); })),
+                    RowInline("Newest lap on top", "Off puts the newest lap at the bottom", Switch(s.NewestOnTop, on => { s.NewestOnTop = on; C(); })),
+                    RowInline("Striped rows", "Alternate row shading", Switch(s.Stripes, on => { s.Stripes = on; C(); }))),
+            ]),
             ("Layout", () =>
             [
                 Card("Size", "Changes apply live",
                     RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
                     RowStacked("Width", MakeSlider(200, 420, 5, s.Width, Px, v => { s.Width = v; C(); })),
                     RowStacked("Row height", MakeSlider(18, 40, 1, s.RowHeight, Px, v => { s.RowHeight = v; C(); })),
-                    RowStacked("Text size", MakeSlider(0.6, 1.8, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); })),
-                    RowStacked("Lap rows", MakeSlider(3, 20, 1, s.Rows, v => $"{v:0}", v => { s.Rows = (int)v; C(); })),
-                    RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
-                TransparencyCard(s, C),
-                FontCard(s, C),
-                StyleCard(s, C),
+                    RowStacked("Text size", MakeSlider(0.6, 1.8, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); }))),
                 PositionCard(w),
             ]),
-            ("Content", () =>
-            [
-                Card("Sections", "Turn parts of the log on or off",
-                    RowInline("Accent stripe", "Thin coloured line on top", Switch(s.ShowAccentStripe, on => { s.ShowAccentStripe = on; C(); })),
-                    RowInline("Title bar", null, Switch(s.ShowTitle, on => { s.ShowTitle = on; C(); })),
-                    RowInline("Title text", null, TitleBox(s, C)),
-                    RowInline("Personal best row", "Your fastest valid lap this session", Switch(s.ShowPersonalBest, on => { s.ShowPersonalBest = on; C(); })),
-                    RowInline("Session best row", "Fastest valid lap of any car", Switch(s.ShowSessionBest, on => { s.ShowSessionBest = on; C(); })),
-                    RowInline("Column headers", "LAP / TIME / PS. BEST / FUEL", Switch(s.ShowColumnHeaders, on => { s.ShowColumnHeaders = on; C(); }))),
-                Card("Columns", null,
-                    RowInline("Gap to personal best", "PS. BEST column", Switch(s.ShowDelta, on => { s.ShowDelta = on; C(); })),
-                    RowInline("Fuel", "Fuel left at the end of each lap", Switch(s.ShowFuel, on => { s.ShowFuel = on; C(); }))),
-                Card("Rows", null,
-                    RowInline("Striped rows", "Alternate row shading", Switch(s.Stripes, on => { s.Stripes = on; C(); })),
-                    RowInline("Newest lap on top", "Off puts the newest lap at the bottom", Switch(s.NewestOnTop, on => { s.NewestOnTop = on; C(); }))),
-            ]),
+            ("Style", () => StyleTab(s, C, (s.ShowAccentStripe, on => s.ShowAccentStripe = on), canCombine: true)),
             ("Colours", () =>
             [
                 Card("Panel", null,
                     RowStacked("Background", Colour(s.BackgroundColor, c => { s.BackgroundColor = c; C(); })),
-                    RowStacked("Title bar & column headers", Colour(s.TitleBarColor, c => { s.TitleBarColor = c; C(); })),
+                    RowStacked("Accent (stripe, title in tile mode)", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
+                    RowStacked("Title bar & column header bar", Colour(s.TitleBarColor, c => { s.TitleBarColor = c; C(); })),
                     RowStacked("Row stripes", Colour(s.StripeColor, c => { s.StripeColor = c; C(); }))),
-                Card("Highlights", null,
-                    RowStacked("Accent stripe", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
-                    RowStacked("Accent stripe opacity", MakeSlider(0, 1, 0.05, s.AccentOpacity, Pct, v => { s.AccentOpacity = v; C(); })),
+                Card("Best laps", null,
                     RowStacked("Personal best row", Colour(s.PersonalBestColor, c => { s.PersonalBestColor = c; C(); })),
-                    RowStacked("Session best row", Colour(s.SessionBestColor, c => { s.SessionBestColor = c; C(); }))),
+                    RowStacked("Session best", Colour(s.SessionBestColor, c => { s.SessionBestColor = c; C(); }))),
                 Card("Text", null,
                     RowStacked("Text", Colour(s.TextColor, c => { s.TextColor = c; C(); })),
                     RowStacked("Column headers", Colour(s.HeaderColor, c => { s.HeaderColor = c; C(); })),
@@ -465,7 +463,7 @@ public sealed class ControlWindow : Window
                 Card("Animations", "Small touches when something happens",
                     RowInline("New lap slides in", null, Switch(s.AnimateNewLap, on => { s.AnimateNewLap = on; C(); })),
                     RowInline("Flash new lap", "Purple for session best, green for PB", Switch(s.FlashNewLap, on => { s.FlashNewLap = on; C(); })),
-                    RowInline("Glow when a best improves", "PB and session best rows light up briefly", Switch(s.GlowOnImprove, on => { s.GlowOnImprove = on; C(); }))),
+                    RowInline("Glow when a best improves", "PB and session best light up briefly", Switch(s.GlowOnImprove, on => { s.GlowOnImprove = on; C(); }))),
             ]),
         ]);
     }
@@ -478,22 +476,9 @@ public sealed class ControlWindow : Window
 
         return OverlayPage("inputs", s, w, new InputsView(_hub, s), "Show in game",
         [
-            ("Layout", () =>
-            [
-                Card("Size", "Changes apply live",
-                    RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
-                    RowStacked("Height", MakeSlider(40, 140, 2, s.Height, Px, v => { s.Height = v; C(); })),
-                    RowStacked("Trace width", MakeSlider(60, 400, 5, s.TraceWidth, Px, v => { s.TraceWidth = v; C(); })),
-                    RowStacked("Line thickness", MakeSlider(0.5, 5, 0.1, s.LineThickness, v => $"{v:0.0}", v => { s.LineThickness = v; C(); })),
-                    RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
-                TransparencyCard(s, C),
-                FontCard(s, C),
-                StyleCard(s, C),
-                PositionCard(w),
-            ]),
             ("Content", () =>
             [
-                Card("Elements", null,
+                Card("Sections", null,
                     RowInline("Gear", null, Switch(s.ShowGear, on => { s.ShowGear = on; C(); })),
                     RowInline("Speed", null, Switch(s.ShowSpeed, on => { s.ShowSpeed = on; C(); })),
                     RowInline("Pedal bars", "Throttle and brake bars", Switch(s.ShowBars, on => { s.ShowBars = on; C(); })),
@@ -504,14 +489,24 @@ public sealed class ControlWindow : Window
                     RowInline("Fill under lines", null, Switch(s.FillTrace, on => { s.FillTrace = on; C(); })),
                     RowInline("Grid lines", "25 / 50 / 75 % guides", Switch(s.GridLines, on => { s.GridLines = on; C(); }))),
             ]),
+            ("Layout", () =>
+            [
+                Card("Size", "Changes apply live",
+                    RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
+                    RowStacked("Height", MakeSlider(40, 140, 2, s.Height, Px, v => { s.Height = v; C(); })),
+                    RowStacked("Trace width", MakeSlider(60, 400, 5, s.TraceWidth, Px, v => { s.TraceWidth = v; C(); })),
+                    RowStacked("Line thickness", MakeSlider(0.5, 5, 0.1, s.LineThickness, v => $"{v:0.0}", v => { s.LineThickness = v; C(); }))),
+                PositionCard(w),
+            ]),
+            ("Style", () => StyleTab(s, C, null, canCombine: true)),
             ("Colours", () =>
             [
                 Card("Panel", null,
                     RowStacked("Background", Colour(s.BackgroundColor, c => { s.BackgroundColor = c; C(); })),
                     RowStacked("Trace background", Colour(s.TraceBackgroundColor, c => { s.TraceBackgroundColor = c; C(); }))),
-                Card("Elements", null,
+                Card("Data", null,
                     RowStacked("Gear", Colour(s.GearColor, c => { s.GearColor = c; C(); })),
-                    RowStacked("Speed", Colour(s.SpeedColor, c => { s.SpeedColor = c; C(); })),
+                    RowStacked("Speed (and tile outlines)", Colour(s.SpeedColor, c => { s.SpeedColor = c; C(); })),
                     RowStacked("Throttle", Colour(s.ThrottleColor, c => { s.ThrottleColor = c; C(); })),
                     RowStacked("Brake", Colour(s.BrakeColor, c => { s.BrakeColor = c; C(); }))),
             ]),
@@ -531,43 +526,37 @@ public sealed class ControlWindow : Window
 
         return OverlayPage("limits", s, w, new TrackLimitsView(_hub, s), "Show in game",
         [
+            ("Content", () =>
+            [
+                Card("Penalties", "A penalty every N warnings. With 3, the counter shows 2/3, then 3/6 after the first penalty, then 6/9, and so on.",
+                    RowStacked("Warnings per penalty", MakeSlider(1, 10, 1, s.WarningLimit, v => $"{v:0}", v => { s.WarningLimit = (int)v; C(); }))),
+                Card("Sections", null,
+                    RowInline("Title", null, Switch(s.ShowTitle, on => { s.ShowTitle = on; C(); })),
+                    RowInline("Title text", null, TextInput(s.TitleText, t => { s.TitleText = t; C(); })),
+                    RowInline("Warning bars", "Progress towards the next penalty", Switch(s.ShowPips, on => { s.ShowPips = on; C(); })),
+                    RowInline("Invalid laps", "Laps invalidated this session, including the current one", Switch(s.ShowInvalidLaps, on => { s.ShowInvalidLaps = on; C(); })),
+                    RowInline("Total warnings", "All warnings, not only track limits", Switch(s.ShowTotalWarnings, on => { s.ShowTotalWarnings = on; C(); })),
+                    RowInline("Penalties", "Time penalties in seconds", Switch(s.ShowPenalties, on => { s.ShowPenalties = on; C(); }))),
+            ]),
             ("Layout", () =>
             [
                 Card("Size", "Changes apply live",
                     RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
                     RowStacked("Width", MakeSlider(150, 360, 5, s.Width, Px, v => { s.Width = v; C(); })),
-                    RowStacked("Text size", MakeSlider(0.6, 1.8, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); })),
-                    RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
-                TransparencyCard(s, C),
-                FontCard(s, C),
-                StyleCard(s, C),
+                    RowStacked("Text size", MakeSlider(0.6, 1.8, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); }))),
                 PositionCard(w),
             ]),
-            ("Content", () =>
-            [
-                Card("Warnings per penalty", "A penalty every N warnings. With 3, the counter shows 2/3, then 3/6 after the first penalty, then 6/9, and so on.",
-                    RowStacked("Warnings per penalty", MakeSlider(1, 10, 1, s.WarningLimit, v => $"{v:0}", v => { s.WarningLimit = (int)v; C(); }))),
-                Card("Sections", null,
-                    RowInline("Accent stripe", null, Switch(s.ShowAccentStripe, on => { s.ShowAccentStripe = on; C(); })),
-                    RowInline("Title bar", null, Switch(s.ShowTitle, on => { s.ShowTitle = on; C(); })),
-                    RowInline("Title text", null, TextInput(s.TitleText, t => { s.TitleText = t; C(); })),
-                    RowInline("Warning pips", "Progress towards the next penalty", Switch(s.ShowPips, on => { s.ShowPips = on; C(); }))),
-                Card("Stats", null,
-                    RowInline("Invalid laps", "Laps invalidated this session, including the current one", Switch(s.ShowInvalidLaps, on => { s.ShowInvalidLaps = on; C(); })),
-                    RowInline("Total warnings", "All warnings, not only track limits", Switch(s.ShowTotalWarnings, on => { s.ShowTotalWarnings = on; C(); })),
-                    RowInline("Penalties", "Time penalties in seconds", Switch(s.ShowPenalties, on => { s.ShowPenalties = on; C(); }))),
-            ]),
+            ("Style", () => StyleTab(s, C, (s.ShowAccentStripe, on => s.ShowAccentStripe = on), canCombine: true)),
             ("Colours", () =>
             [
                 Card("Panel", null,
                     RowStacked("Background", Colour(s.BackgroundColor, c => { s.BackgroundColor = c; C(); })),
-                    RowStacked("Accent stripe", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
-                    RowStacked("Accent stripe opacity", MakeSlider(0, 1, 0.05, s.AccentOpacity, Pct, v => { s.AccentOpacity = v; C(); })),
+                    RowStacked("Accent (stripe, title in tile mode)", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
                     RowStacked("Text", Colour(s.TextColor, c => { s.TextColor = c; C(); }))),
                 Card("Status", "The counter changes colour as you collect warnings",
                     RowStacked("Clean (0 warnings)", Colour(s.OkColor, c => { s.OkColor = c; C(); })),
                     RowStacked("Warning", Colour(s.WarnColor, c => { s.WarnColor = c; C(); })),
-                    RowStacked("Last warning / limit reached", Colour(s.DangerColor, c => { s.DangerColor = c; C(); }))),
+                    RowStacked("Last warning / penalty", Colour(s.DangerColor, c => { s.DangerColor = c; C(); }))),
             ]),
             ("Effects", () =>
             [
@@ -585,47 +574,36 @@ public sealed class ControlWindow : Window
 
         return OverlayPage("tyres", s, w, new TyreStrategyView(_hub, s), "Show in game",
         [
-            ("Strategy", () =>
-            [
-                Card("Tyre wear limit", "'Laps left' counts down to this wear. Many drivers pit around 60-75%.",
-                    RowStacked("Box at tyre wear", MakeSlider(30, 95, 1, s.PitWearThreshold, v => $"{v:0}%", v => { s.PitWearThreshold = v; C(); }))),
-                Card("Forecast", null,
-                    RowStacked("Forecast slots shown", MakeSlider(1, 8, 1, s.ForecastCount, v => $"{v:0}", v => { s.ForecastCount = (int)v; C(); }))),
-                Card("How it decides", "Optimal now: dry tyres in clear/cloudy/overcast weather, intermediates in light rain, full wets in heavy rain or storm, looking 5 minutes ahead. " +
-                    "Laps left: your wear per lap this stint, counted down to the wear limit. It's an estimate, so trust your engineer for the final call."),
-            ]),
-            ("Layout", () =>
-            [
-                Card("Size", "Changes apply live",
-                    RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
-                    RowStacked("Width", MakeSlider(230, 420, 5, s.Width, Px, v => { s.Width = v; C(); })),
-                    RowStacked("Text size", MakeSlider(0.6, 1.8, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); })),
-                    RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
-                TransparencyCard(s, C),
-                FontCard(s, C),
-                StyleCard(s, C),
-                PositionCard(w),
-            ]),
             ("Content", () =>
             [
                 Card("Sections", "Turn parts of the panel on or off",
-                    RowInline("Accent stripe", null, Switch(s.ShowAccentStripe, on => { s.ShowAccentStripe = on; C(); })),
-                    RowInline("Title bar", null, Switch(s.ShowTitle, on => { s.ShowTitle = on; C(); })),
+                    RowInline("Title", null, Switch(s.ShowTitle, on => { s.ShowTitle = on; C(); })),
                     RowInline("Title text", null, TextInput(s.TitleText, t => { s.TitleText = t; C(); })),
                     RowInline("Current tyre", "Compound, age, wear and laps left", Switch(s.ShowCurrent, on => { s.ShowCurrent = on; C(); })),
                     RowInline("Wear per wheel", "FL / FR / RL / RR", Switch(s.ShowWheels, on => { s.ShowWheels = on; C(); })),
                     RowInline("Weather now", null, Switch(s.ShowWeather, on => { s.ShowWeather = on; C(); })),
                     RowInline("Forecast", "Upcoming weather and rain chance", Switch(s.ShowForecast, on => { s.ShowForecast = on; C(); })),
                     RowInline("Optimal tyre now", null, Switch(s.ShowOptimalNow, on => { s.ShowOptimalNow = on; C(); }))),
+                Card("Strategy", "'Laps left' counts down to the wear limit (many drivers pit around 60-75%). Optimal now: slicks when dry, inters in light rain, wets in heavy rain, looking 5 minutes ahead.",
+                    RowStacked("Wear limit", MakeSlider(30, 95, 1, s.PitWearThreshold, v => $"{v:0}%", v => { s.PitWearThreshold = v; C(); })),
+                    RowStacked("Forecast slots", MakeSlider(1, 8, 1, s.ForecastCount, v => $"{v:0}", v => { s.ForecastCount = (int)v; C(); }))),
             ]),
+            ("Layout", () =>
+            [
+                Card("Size", "Changes apply live",
+                    RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
+                    RowStacked("Width", MakeSlider(230, 420, 5, s.Width, Px, v => { s.Width = v; C(); })),
+                    RowStacked("Text size", MakeSlider(0.6, 1.8, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); }))),
+                PositionCard(w),
+            ]),
+            ("Style", () => StyleTab(s, C, (s.ShowAccentStripe, on => s.ShowAccentStripe = on), canCombine: true)),
             ("Colours", () =>
             [
                 Card("Panel", null,
                     RowStacked("Background", Colour(s.BackgroundColor, c => { s.BackgroundColor = c; C(); })),
-                    RowStacked("Accent stripe", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
-                    RowStacked("Accent stripe opacity", MakeSlider(0, 1, 0.05, s.AccentOpacity, Pct, v => { s.AccentOpacity = v; C(); })),
+                    RowStacked("Accent (stripe, title in tile mode)", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
                     RowStacked("Text", Colour(s.TextColor, c => { s.TextColor = c; C(); })),
-                    RowStacked("Alerts (box now, weather change)", Colour(s.AlertColor, c => { s.AlertColor = c; C(); }))),
+                    RowStacked("Alerts (switch tyres, weather change)", Colour(s.AlertColor, c => { s.AlertColor = c; C(); }))),
                 Card("Tyre compounds", null,
                     RowStacked("Soft", Colour(s.SoftColor, c => { s.SoftColor = c; C(); })),
                     RowStacked("Medium", Colour(s.MediumColor, c => { s.MediumColor = c; C(); })),
@@ -636,9 +614,54 @@ public sealed class ControlWindow : Window
             ("Effects", () =>
             [
                 Card("Animations", null,
-                    RowInline("Pulse when you should change tyres", "The 'optimal now' row glows when your tyre doesn't match the conditions", Switch(s.PulseOnChange, on => { s.PulseOnChange = on; C(); }))),
+                    RowInline("Pulse when you should change tyres", "'Optimal now' glows when your tyre doesn't match the conditions", Switch(s.PulseOnChange, on => { s.PulseOnChange = on; C(); }))),
             ]),
         ]);
+    }
+
+    /// <summary>
+    /// The Style tab, the same on every overlay: look (flat/tiles), fonts, transparency and outlines.
+    /// </summary>
+    private UIElement[] StyleTab(OverlaySettings s, Action C, (bool On, Action<bool> Set)? stripe, bool canCombine)
+    {
+        var look = new ChoiceChips(StyleChoices, s.Style);
+        look.Changed += v => { s.Style = v; C(); };
+        var lookRows = new List<UIElement>
+        {
+            RowStacked("Look", look),
+            RowInline("Tile glow", "Soft glow around tiles (Dash tiles)", Switch(s.Glow, on => { s.Glow = on; C(); })),
+        };
+        if (canCombine)
+            lookRows.Add(RowInline("Combine into one tile", "One tile around everything instead of one per section (Dash tiles)", Switch(s.CombineTiles, on => { s.CombineTiles = on; C(); })));
+        lookRows.Add(RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); })));
+        if (stripe is { } st)
+        {
+            lookRows.Add(RowInline("Accent stripe", "Thin coloured line on top (Flat panel)", Switch(st.On, on => { st.Set(on); C(); })));
+            lookRows.Add(RowStacked("Accent stripe opacity", MakeSlider(0, 1, 0.05, s.AccentOpacity, Pct, v => { s.AccentOpacity = v; C(); })));
+        }
+
+        var textFont = new ChoiceChips(FontChoices, s.FontFamily, previewFont: true);
+        textFont.Changed += f => { s.FontFamily = f; C(); };
+        var numberFont = new ChoiceChips(NumberFontChoices, s.NumberFont);
+        numberFont.Changed += f => { s.NumberFont = f; C(); };
+
+        return
+        [
+            Card("Look", "Flat panel is one clean box. Dash tiles splits it into glowing coloured tiles, like a wheel display.", lookRows.ToArray()),
+            Card("Fonts", "Digital uses a 7-segment font for the big numbers; small text stays readable.",
+                RowStacked("Text", textFont),
+                RowStacked("Numbers", numberFont)),
+            Card("Transparency", null,
+                RowStacked("Overall opacity", MakeSlider(0.2, 1.0, 0.05, s.Opacity, Pct, v => { s.Opacity = v; C(); })),
+                RowStacked("Background opacity", MakeSlider(0, 1.0, 0.05, s.BackgroundOpacity, Pct, v => { s.BackgroundOpacity = v; C(); }))),
+            Card("Outline", "Keeps text and panels readable over bright scenery.",
+                RowInline("Text outline", null, Switch(s.TextOutline, on => { s.TextOutline = on; C(); })),
+                RowStacked("Text outline colour", Colour(s.TextOutlineColor, c => { s.TextOutlineColor = c; C(); })),
+                RowStacked("Text outline thickness", MakeSlider(0.5, 4, 0.25, s.TextOutlineWidth, v => $"{v:0.##} px", v => { s.TextOutlineWidth = v; C(); })),
+                RowInline("Panel / tile outline", null, Switch(s.PanelOutline, on => { s.PanelOutline = on; C(); })),
+                RowStacked("Panel outline colour", Colour(s.PanelOutlineColor, c => { s.PanelOutlineColor = c; C(); })),
+                RowStacked("Panel outline thickness", MakeSlider(0.5, 6, 0.5, s.PanelOutlineWidth, v => $"{v:0.#} px", v => { s.PanelOutlineWidth = v; C(); }))),
+        ];
     }
 
     // ───────────────────────────── themes & general ─────────────────────────────
@@ -1159,33 +1182,9 @@ public sealed class ControlWindow : Window
             stack);
     }
 
-    private Border TransparencyCard(OverlaySettings s, Action changed) =>
-        Card("Transparency", null,
-            RowStacked("Overall opacity", MakeSlider(0.2, 1.0, 0.05, s.Opacity, Pct, v => { s.Opacity = v; changed(); })),
-            RowStacked("Background opacity", MakeSlider(0, 1.0, 0.05, s.BackgroundOpacity, Pct, v => { s.BackgroundOpacity = v; changed(); })));
-
     private static readonly (string Value, string Label)[] StyleChoices = [("Flat", "Flat panel"), ("Tiles", "Dash tiles")];
     private static readonly (string Value, string Label)[] NumberFontChoices =
         [("", "Same as text"), (OverlayView.DigitalFont, "Digital (7-segment)"), ("Bahnschrift", "Bahnschrift"), ("Consolas", "Consolas")];
-
-    private static Border StyleCard(OverlaySettings s, Action changed)
-    {
-        var style = new ChoiceChips(StyleChoices, s.Style);
-        style.Changed += v => { s.Style = v; changed(); };
-        var numbers = new ChoiceChips(NumberFontChoices, s.NumberFont);
-        numbers.Changed += v => { s.NumberFont = v; changed(); };
-        return Card("Style", "Dash tiles splits the overlay into glowing coloured tiles, like a wheel dash display.",
-            RowStacked("Look", style),
-            RowStacked("Number font", numbers),
-            RowInline("Tile glow", "Soft glow around each tile (Dash tiles only)", Switch(s.Glow, on => { s.Glow = on; changed(); })));
-    }
-
-    private static Border FontCard(OverlaySettings s, Action changed)
-    {
-        var chips = new ChoiceChips(FontChoices, s.FontFamily, previewFont: true);
-        chips.Changed += f => { s.FontFamily = f; changed(); };
-        return Card("Font", "Bahnschrift gives a condensed, racing-style look", chips);
-    }
 
     private static TextBox TextInput(string initial, Action<string> changed)
     {
@@ -1329,23 +1328,9 @@ public sealed class ControlWindow : Window
         return OverlayPage("fps", s, w, new FpsView(_hub, s, _fpsMonitor), "Show in game",
         [
             ("Setup", () => [FpsSetupCard(), FpsSourceCard(s, C)]),
-            ("Layout", () =>
-            [
-                Card("Size", "Changes apply live",
-                    RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
-                    RowInline("Fit width to content", "The panel shrinks to what's switched on", Switch(s.AutoWidth, on => { s.AutoWidth = on; C(); })),
-                    RowStacked("Width (when not fitting)", MakeSlider(80, 320, 5, s.Width, Px, v => { s.Width = v; C(); })),
-                    RowStacked("Text size", MakeSlider(0.6, 2.0, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); })),
-                    RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
-                TransparencyCard(s, C),
-                FontCard(s, C),
-                StyleCard(s, C),
-                PositionCard(w),
-            ]),
             ("Content", () =>
             [
-                Card("Shown", null,
-                    RowInline("Accent stripe", null, Switch(s.ShowAccentStripe, on => { s.ShowAccentStripe = on; C(); })),
+                Card("Sections", null,
                     RowInline("FPS number", "The big frame rate", Switch(s.ShowNumber, on => { s.ShowNumber = on; C(); })),
                     RowInline("\"FPS\" label", null, Switch(s.ShowLabel, on => { s.ShowLabel = on; C(); })),
                     RowInline("1% low", "Average of your slowest 1% of frames over the last 10 seconds: shows stutter", Switch(s.ShowLow, on => { s.ShowLow = on; C(); })),
@@ -1356,12 +1341,21 @@ public sealed class ControlWindow : Window
                     RowStacked("Good from", MakeSlider(30, 360, 5, s.GoodFps, v => $"{v:0} fps", v => { s.GoodFps = v; C(); })),
                     RowStacked("OK from", MakeSlider(20, 240, 5, s.OkFps, v => $"{v:0} fps", v => { s.OkFps = v; C(); }))),
             ]),
+            ("Layout", () =>
+            [
+                Card("Size", "Changes apply live",
+                    RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
+                    RowInline("Fit width to content", "The panel shrinks to what's switched on", Switch(s.AutoWidth, on => { s.AutoWidth = on; C(); })),
+                    RowStacked("Width (when not fitting)", MakeSlider(80, 320, 5, s.Width, Px, v => { s.Width = v; C(); })),
+                    RowStacked("Text size", MakeSlider(0.6, 2.0, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); }))),
+                PositionCard(w),
+            ]),
+            ("Style", () => StyleTab(s, C, (s.ShowAccentStripe, on => s.ShowAccentStripe = on), canCombine: false)),
             ("Colours", () =>
             [
                 Card("Panel", null,
                     RowStacked("Background", Colour(s.BackgroundColor, c => { s.BackgroundColor = c; C(); })),
                     RowStacked("Accent stripe", Colour(s.AccentColor, c => { s.AccentColor = c; C(); })),
-                    RowStacked("Accent stripe opacity", MakeSlider(0, 1, 0.05, s.AccentOpacity, Pct, v => { s.AccentOpacity = v; C(); })),
                     RowStacked("Text", Colour(s.TextColor, c => { s.TextColor = c; C(); }))),
                 Card("Frame rate", null,
                     RowStacked("Good (and graph)", Colour(s.GoodColor, c => { s.GoodColor = c; C(); })),

@@ -66,6 +66,21 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
 
     protected bool Tiles => _base.Style == "Tiles";
 
+    /// <summary>Tile mode with everything merged into one tile.</summary>
+    protected bool Combined => Tiles && _base.CombineTiles;
+
+    /// <summary>A tile for one section (skipped when sections are combined into one tile).</summary>
+    protected void SectionTile(DrawingContext dc, Rect rect, string hex)
+    {
+        if (Tiles && !_base.CombineTiles) DrawTile(dc, rect, hex);
+    }
+
+    /// <summary>The single tile used when sections are combined.</summary>
+    protected void CombinedTile(DrawingContext dc, Rect rect, string hex)
+    {
+        if (Combined) DrawTile(dc, rect, hex);
+    }
+
     /// <summary>The thin accent line on top: hidden in tile mode, where every tile has its own coloured outline.</summary>
     protected bool ShowStripe(bool enabled) => enabled && !Tiles;
 
@@ -90,6 +105,13 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
             Color.FromArgb(70, c.R, c.G, c.B), Color.FromArgb(22, c.R, c.G, c.B), 90);
         fill.Freeze();
         dc.DrawRoundedRectangle(Theme.Brush("#000000", 0.45), null, rect, r, r);
+        if (_base.PanelOutline)
+        {
+            // Dark (or any colour) outline just outside the coloured border, so tiles pop on bright backgrounds.
+            double ow = Math.Clamp(_base.PanelOutlineWidth, 0.5, 6);
+            var outer = new Rect(rect.X - 0.75 - ow / 2, rect.Y - 0.75 - ow / 2, rect.Width + 1.5 + ow, rect.Height + 1.5 + ow);
+            dc.DrawRoundedRectangle(null, new Pen(Theme.Brush(_base.PanelOutlineColor), ow), outer, r + ow / 2, r + ow / 2);
+        }
         dc.DrawRoundedRectangle(fill, new Pen(Theme.Brush(hex, 0.9), 1.5), rect, r, r);
     }
 
@@ -109,6 +131,13 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
             _ => x,
         };
         var origin = new Point(Math.Round(left), Math.Round(yCenter - ft.Height / 2));
+        if (_base.TextOutline)
+        {
+            // Outline: stroke the glyph shapes, then draw the text on top so only the outside edge shows.
+            double ow = Math.Clamp(_base.TextOutlineWidth, 0.5, 5);
+            var geo = ft.BuildGeometry(origin);
+            dc.DrawGeometry(null, new Pen(Theme.Brush(_base.TextOutlineColor), ow * 2) { LineJoin = PenLineJoin.Round }, geo);
+        }
         dc.DrawText(ft, origin);
         return new Rect(origin, new Size(ft.Width, ft.Height));
     }
@@ -124,6 +153,13 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
 
     protected void EndPanel(DrawingContext dc, Size size)
     {
+        if (_base.PanelOutline && !Tiles)
+        {
+            double ow = Math.Clamp(_base.PanelOutlineWidth, 0.5, 6);
+            double pr = Math.Clamp(_base.CornerRadius, 0, Math.Min(size.Width, size.Height) / 2);
+            dc.DrawRoundedRectangle(null, new Pen(Theme.Brush(_base.PanelOutlineColor), ow),
+                new Rect(ow / 2, ow / 2, size.Width - ow, size.Height - ow), Math.Max(0, pr - ow / 2), Math.Max(0, pr - ow / 2));
+        }
         dc.Pop();
         if (!Unlocked) return;
         double r = Math.Clamp(_base.CornerRadius, 0, Math.Min(size.Width, size.Height) / 2);
@@ -194,6 +230,7 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
             DrawText(dc, s.TitleText ?? "", 11 * fs, Tiles ? Theme.Brush(s.AccentColor) : text, w / 2, y + TitleH / 2, TextAlignment.Center, heavy: true);
             y += TitleH;
         }
+        CombinedTile(dc, TileRect(0, y, w, size.Height - y, 3), s.AccentColor);
         if (s.ShowPersonalBest)
         {
             DrawBestRow(dc, y, Theme.Brush(s.PersonalBestColor, bgAlpha), s.FasterColor, "PERSONAL\nSESSION BEST", pb, _pbFlashAt);
@@ -206,8 +243,7 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
         }
 
         double timeX = Math.Round(w * 0.177), deltaX = Math.Round(w * 0.54);
-        if (Tiles)
-            DrawTile(dc, TileRect(0, y, w, (s.ShowColumnHeaders ? rowH : 0) + rows * rowH), s.HeaderColor);
+        SectionTile(dc, TileRect(0, y, w, (s.ShowColumnHeaders ? rowH : 0) + rows * rowH), s.HeaderColor);
         if (s.ShowColumnHeaders)
         {
             if (!Tiles) dc.DrawRectangle(Theme.Brush(s.TitleBarColor, Math.Min(1, bgAlpha + 0.05)), null, new Rect(0, y, w, rowH));
@@ -342,7 +378,12 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
     {
         double w = W, h = BestH, fs = Fs;
         var area = Tiles ? TileRect(0, y, w, h) : new Rect(0, y, w, h);
-        if (Tiles) DrawTile(dc, area, tileHex);
+        if (Tiles)
+        {
+            SectionTile(dc, area, tileHex);
+            // Combined: no separate tile, just a soft tint so the best-lap rows still stand out.
+            if (Combined) dc.DrawRoundedRectangle(Theme.Brush(tileHex, 0.16), null, area, InnerRadius, InnerRadius);
+        }
         else dc.DrawRectangle(bg, null, area);
         double t = Now - flashAt;
         if (s.GlowOnImprove && t < 1.2)
@@ -400,10 +441,12 @@ public sealed class InputsView(TelemetryHub hub, InputsSettings s) : OverlayView
         double h = H, x = 0;
         BeginPanel(dc, size);
 
+        CombinedTile(dc, TileRect(0, 0, size.Width, size.Height, 3), s.SpeedColor);
+
         // Gear + speed
         if (GearW > 0)
         {
-            if (Tiles) DrawTile(dc, TileRect(0, 0, GearW, h, 4), s.GearColor);
+            SectionTile(dc, TileRect(0, 0, GearW, h, 4), s.GearColor);
             double cx = GearW / 2 + (Tiles ? 0 : 2);
             if (s.ShowGear)
             {
@@ -424,7 +467,7 @@ public sealed class InputsView(TelemetryHub hub, InputsSettings s) : OverlayView
         {
             if (GearW == 0) x += Pad;
             var area = new Rect(x, Pad, TraceW, h - Pad * 2);
-            if (Tiles) DrawTile(dc, area, s.SpeedColor);
+            if (Tiles) SectionTile(dc, area, s.SpeedColor);
             else
             {
                 var frame = new Pen(Theme.Brush("#FFFFFF", 0.14), 1);
@@ -460,7 +503,7 @@ public sealed class InputsView(TelemetryHub hub, InputsSettings s) : OverlayView
         if (s.ShowBars)
         {
             double bx = x + Pad;
-            if (Tiles) DrawTile(dc, new Rect(bx - 4, 4, BarW * 2 + BarGap + 8, h - 8), s.SpeedColor);
+            SectionTile(dc, new Rect(bx - 4, 4, BarW * 2 + BarGap + 8, h - 8), s.SpeedColor);
             DrawBar(dc, bx, _thrSmooth, s.ThrottleColor);
             DrawBar(dc, bx + BarW + BarGap, _brkSmooth, s.BrakeColor);
         }
@@ -580,7 +623,8 @@ public sealed class TrackLimitsView(TelemetryHub hub, TrackLimitsSettings s) : O
 
         // Big counter
         double mainTop = y;
-        if (Tiles) DrawTile(dc, TileRect(0, mainTop, w, MainH), stateHex);
+        CombinedTile(dc, TileRect(0, mainTop, w, size.Height - mainTop, 3), stateHex);
+        SectionTile(dc, TileRect(0, mainTop, w, MainH), stateHex);
         double numY = mainTop + (s.ShowPips ? MainH * 0.45 : MainH / 2);
         var num = DrawText(dc, warnings.ToString(CultureInfo.InvariantCulture), 40 * fs, state, Tiles ? 14 : 12, numY, heavy: true, numeric: true);
         DrawText(dc, $"/ {next}", 16 * fs, muted, num.Right + 6, numY + 6 * fs, heavy: true, numeric: true);
@@ -604,7 +648,7 @@ public sealed class TrackLimitsView(TelemetryHub hub, TrackLimitsSettings s) : O
         // Stats
         if (StatCount > 0)
         {
-            if (Tiles) DrawTile(dc, TileRect(0, y, w, StatCount * StatH + 6), s.TextColor);
+            SectionTile(dc, TileRect(0, y, w, StatCount * StatH + 6), s.TextColor);
             y += 3;
             void Stat(string label, string value, Brush valueBrush)
             {
@@ -657,14 +701,15 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
             y += H(24);
         }
 
-        void Divider() { if (!Tiles) dc.DrawRectangle(line, null, new Rect(10, y, w - 20, 1)); }
+        void Divider() { if (!Tiles || Combined) dc.DrawRectangle(line, null, new Rect(10, y, w - 20, 1)); }
+        CombinedTile(dc, TileRect(0, y, w, size.Height - y, 3), s.AccentColor);
         string WearHex(double v) => v >= s.PitWearThreshold ? s.SoftColor : v >= s.PitWearThreshold * 0.75 ? s.MediumColor : s.InterColor;
 
         // Current tyre
         if (s.ShowCurrent)
         {
             double h = H(60), cy = y + h / 2;
-            if (Tiles) DrawTile(dc, TileRect(0, y, w, h), CompoundHex(a.FittedVisual));
+            SectionTile(dc, TileRect(0, y, w, h), CompoundHex(a.FittedVisual));
             DrawChip(dc, 12 + 18 * fs, cy, 18 * fs, a.FittedVisual);
             double tx = 12 + 44 * fs;
             DrawText(dc, CompoundName(a.FittedVisual), 14 * fs, text, tx, cy - 9 * fs, heavy: true);
@@ -682,7 +727,7 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
         {
             double h = H(40);
             Divider();
-            if (Tiles) DrawTile(dc, TileRect(0, y, w, h, 3), WearHex(a.MaxWear));
+            SectionTile(dc, TileRect(0, y, w, h, 3), WearHex(a.MaxWear));
             string[] labels = ["FL", "FR", "RL", "RR"];
             int[] idx = [2, 3, 0, 1]; // wear array is RL, RR, FL, FR
             double cellW = (w - 24) / 4;
@@ -705,7 +750,7 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
         if (Tiles && (s.ShowWeather || s.ShowForecast))
         {
             var nowHex = a.ConditionsNow == Conditions.Dry ? s.TextColor : a.ConditionsNow == Conditions.Inter ? s.InterColor : s.WetColor;
-            DrawTile(dc, TileRect(0, y, w, (s.ShowWeather ? H(30) : 0) + (s.ShowForecast ? H(44) : 0), 3), nowHex);
+            SectionTile(dc, TileRect(0, y, w, (s.ShowWeather ? H(30) : 0) + (s.ShowForecast ? H(44) : 0), 3), nowHex);
         }
 
         // Weather now
@@ -748,7 +793,7 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
         {
             double h = H(58), cy = y + h / 2;
             Divider();
-            if (Tiles) DrawTile(dc, TileRect(0, y, w, h, 3), a.ChangeNow && a.HasData ? s.AlertColor : CompoundHex(a.OptimalNowVisual));
+            SectionTile(dc, TileRect(0, y, w, h, 3), a.ChangeNow && a.HasData ? s.AlertColor : CompoundHex(a.OptimalNowVisual));
             if (a.ChangeNow && a.HasData)
             {
                 double alpha = s.PulseOnChange ? 0.18 + 0.14 * Math.Sin(Now * 5) : 0.25;

@@ -23,7 +23,7 @@ public static class Theme
     public static readonly string[] Presets =
     [
         "#E10600", "#FF8700", "#FFA21A", "#FFD400", "#E8C33A", "#2BD34F", "#00D2BE",
-        "#2F7BFF", "#6C5CE7", "#9B00B8", "#FF3D9A", "#FFFFFF",
+        "#2F7BFF", "#6C5CE7", "#9B00B8", "#FF3D9A", "#FFFFFF", "#A0A0AA", "#4A4A55", "#1A1A20", "#000000",
     ];
 
     public static Color C(string hex) => (Color)ColorConverter.ConvertFromString(hex);

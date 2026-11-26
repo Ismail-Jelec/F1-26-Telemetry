@@ -33,6 +33,26 @@ public static class Snapshot
             looks.Add((theme.Name.Replace(' ', '-').ToLowerInvariant(), s));
         }
 
+        // Extra variants to review the outline and combined-tile options.
+        var dash = OverlayTheme.All.First(t => t.Name == "Dash");
+        var combined = new Settings();
+        dash.ApplyTo(combined);
+        foreach (var o in new OverlaySettings[] { combined.LapLog, combined.Inputs, combined.TrackLimits, combined.Tyres, combined.Fps })
+        {
+            o.CombineTiles = true;
+            o.PanelOutline = true;
+            o.TextOutline = true;
+        }
+        looks.Add(("dash-combined-outlined", combined));
+        var flatOutlined = new Settings();
+        foreach (var o in new OverlaySettings[] { flatOutlined.LapLog, flatOutlined.Inputs, flatOutlined.TrackLimits, flatOutlined.Tyres, flatOutlined.Fps })
+        {
+            o.PanelOutline = true;
+            o.TextOutline = true;
+            o.BackgroundOpacity = 0.35;
+        }
+        looks.Add(("flat-outlined-see-through", flatOutlined));
+
         foreach (var (name, s) in looks)
         {
             // Fresh fake frames right before rendering (the counter only shows the last couple of seconds).

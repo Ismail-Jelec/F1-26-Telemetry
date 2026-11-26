@@ -202,8 +202,14 @@ public sealed class ColorSwatches : WrapPanel
 
     public void Select(string hex)
     {
+        // Every swatch gets a thin outline (so black and dark greys are visible on the dark menu);
+        // the selected one gets a thick white ring.
         foreach (var (h, el) in _items)
-            el.BorderThickness = new Thickness(string.Equals(h, hex, StringComparison.OrdinalIgnoreCase) ? 2.5 : 0);
+        {
+            bool selected = string.Equals(h, hex, StringComparison.OrdinalIgnoreCase);
+            el.BorderThickness = new Thickness(selected ? 2.5 : 1);
+            el.BorderBrush = selected ? Brushes.White : Theme.B(Theme.C("#FF55555F"));
+        }
     }
 }
 

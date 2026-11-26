@@ -17,6 +17,15 @@ public abstract class OverlaySettings
     /// <summary>Font for numbers; empty = same as the text font, "Digital" = 7-segment.</summary>
     public string NumberFont { get; set; } = "";
     public bool Glow { get; set; } = true;
+    /// <summary>Tile mode: one tile around everything instead of one per section.</summary>
+    public bool CombineTiles { get; set; }
+
+    public bool TextOutline { get; set; }
+    public string TextOutlineColor { get; set; } = "#000000";
+    public double TextOutlineWidth { get; set; } = 1.5;
+    public bool PanelOutline { get; set; }
+    public string PanelOutlineColor { get; set; } = "#000000";
+    public double PanelOutlineWidth { get; set; } = 2;
     public string FontFamily { get; set; } = "Segoe UI";
     public double[]? Position { get; set; }
 }
