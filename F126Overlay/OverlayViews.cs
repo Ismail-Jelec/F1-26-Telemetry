@@ -119,19 +119,22 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
     protected static Rect TileRect(double x, double y, double w, double h, double gap = 4) =>
         new(x + gap, y + gap, Math.Max(0, w - gap * 2), Math.Max(0, h - gap * 2));
 
-    private static readonly Dictionary<(string, int, string, bool, bool), double> InkCenters = [];
+    private static readonly Dictionary<(int, string, bool, bool), double> InkCenters = [];
 
     /// <summary>
-    /// Vertical middle of the drawn glyphs, measured from the text's top. Measured once per text/size/font
-    /// from the real glyph outlines (font metrics differ a lot, e.g. the 7-segment font) and cached.
+    /// Vertical middle of a digit/capital in this font and size, measured from the text's top.
+    /// Every text is centred on this (not on its own glyphs), so a row of numbers and words like "kg"
+    /// shares one baseline; measured once from real glyph outlines because font metrics differ a lot
+    /// (e.g. the 7-segment font), then cached.
     /// </summary>
-    private double InkCenter(FormattedText ft, string text, double size, bool heavy, bool numeric)
+    private double InkCenter(FormattedText ft, double size, bool heavy, bool numeric)
     {
-        var key = (text, (int)Math.Round(size * 10), (numeric ? _base.NumberFont : "") + "|" + _base.FontFamily, heavy, numeric);
+        var key = ((int)Math.Round(size * 10), (numeric ? _base.NumberFont : "") + "|" + _base.FontFamily, heavy, numeric);
         if (InkCenters.TryGetValue(key, out double c)) return c;
-        var bounds = ft.BuildGeometry(new Point(0, 0)).Bounds;
+        var sample = Text("0H", size, Brushes.White, heavy, numeric);
+        var bounds = sample.BuildGeometry(new Point(0, 0)).Bounds;
         c = bounds.IsEmpty || bounds.Height <= 0 ? ft.Height / 2 : bounds.Top + bounds.Height / 2;
-        if (InkCenters.Count > 20_000) InkCenters.Clear();
+        if (InkCenters.Count > 5_000) InkCenters.Clear();
         InkCenters[key] = c;
         return c;
     }
@@ -149,7 +152,7 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
         };
         // Centre on the visible ink, not the line box: digits have no descenders, so centring the line
         // box (which reserves room below the baseline) made big numbers sit too high.
-        double top = yCenter - InkCenter(ft, s, size, heavy, numeric);
+        double top = yCenter - InkCenter(ft, size, heavy, numeric);
         var origin = new Point(Math.Round(left), Math.Round(top));
         // Faint text (placeholders, hints) stays without an outline; it would only add noise.
         if (_base.TextOutline && !(brush is SolidColorBrush sb && sb.Color.A < 128))
