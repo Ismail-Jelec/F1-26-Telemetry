@@ -54,7 +54,9 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
     {
         // The 7-segment font can't show letters clearly ("SB" reads as "56"), so text with letters
         // in it, like "PB", "kg" or "none", always uses the normal font.
-        if (numeric && DigitalNumbers && s.Any(char.IsLetter)) numeric = false;
+        // Like real dashes, segment digits are for the big "hero" numbers only; small figures stay in the
+        // normal font where they're easier to read at a glance.
+        if (numeric && DigitalNumbers && (size < 16 || s.Any(c => !(char.IsDigit(c) || c is ':' or '.' or '-' or ' ' or '/')))) numeric = false;
         var faces = numeric ? NumberFaces : Faces;
         // 7-segment digits are big for their point size; scale them down to sit with normal text.
         if (numeric && DigitalNumbers) size *= 0.8;
@@ -209,7 +211,7 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
         if (s.ShowColumnHeaders)
         {
             if (!Tiles) dc.DrawRectangle(Theme.Brush(s.TitleBarColor, Math.Min(1, bgAlpha + 0.05)), null, new Rect(0, y, w, rowH));
-            double cy = y + rowH / 2;
+            double cy = y + rowH / 2 + (Tiles ? 2 : 0);
             DrawText(dc, "LAP", 11 * fs, header, 10, cy, heavy: true);
             DrawText(dc, "TIME", 11 * fs, header, timeX, cy, heavy: true);
             if (s.ShowDelta)
@@ -313,8 +315,17 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
         return (d.ToString("+0.000;-0.000", CultureInfo.InvariantCulture), d > 0 ? s.SlowerColor : s.FasterColor);
     }
 
+    private bool _primed;
+
     private void DetectChanges(int count, LapRecord[] newestFirst, uint pb, uint sb)
     {
+        if (!_primed)
+        {
+            // First look at the data (e.g. the app opened mid-session): no slide or flash for laps already done.
+            _primed = true;
+            _seenLaps = count; _seenPb = pb; _seenSb = sb;
+            return;
+        }
         if (count > _seenLaps && newestFirst.Length > 0)
         {
             var lap = newestFirst[0];
