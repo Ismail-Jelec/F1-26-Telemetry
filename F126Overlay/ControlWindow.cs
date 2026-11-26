@@ -851,8 +851,39 @@ public sealed class ControlWindow : Window
             if (flag != 0 && (flags & flag) != 0) RunWheelAction(actionKey);
     }
 
+    /// <summary>True while "hide all" is active: overlays are hidden and waiting to be brought back.</summary>
+    private bool AllHidden => _settings.RestoreAfterHideAll != null && !AllOverlays.Any(o => o.Settings.Enabled);
+
     private void RunWheelAction(string key)
     {
+        var overlays = AllOverlays;
+        int Index(OverlayWindow w) => Array.IndexOf(overlays, w);
+
+        // While everything is hidden, the other buttons quietly change what comes back on the next
+        // "show all" instead of popping single overlays up (which would also overwrite that memory).
+        if (key != "all" && AllHidden)
+        {
+            var restore = _settings.RestoreAfterHideAll!;
+            void Flip(OverlayWindow w) { int i = Index(w); if (!restore.Remove(i)) restore.Add(i); }
+            void Set(OverlayWindow w, bool on) { int i = Index(w); restore.Remove(i); if (on) restore.Add(i); }
+            switch (key)
+            {
+                case "swap":
+                    bool tyresNext = restore.Contains(Index(_tyres));
+                    Set(_tyres, !tyresNext);
+                    Set(_limits, tyresNext);
+                    ShowToast(tyresNext ? "Track limits will come back" : "Tyre strategy will come back");
+                    break;
+                case "limits": Flip(_limits); break;
+                case "tyres": Flip(_tyres); break;
+                case "laplog": Flip(_lapLog); break;
+                case "inputs": Flip(_inputs); break;
+                case "fps": Flip(_fps); break;
+            }
+            RequestSave();
+            return;
+        }
+
         switch (key)
         {
             case "swap":
@@ -866,12 +897,14 @@ public sealed class ControlWindow : Window
             case "inputs": SetOverlayEnabled(_inputs, !_inputs.Settings.Enabled); break;
             case "fps": SetOverlayEnabled(_fps, !_fps.Settings.Enabled); break;
             case "all":
-                var overlays = AllOverlays;
                 var shown = Enumerable.Range(0, overlays.Length).Where(i => overlays[i].Settings.Enabled).ToList();
                 if (shown.Count > 0)
                 {
                     // Hide everything, remembering what was on so the next press brings back exactly that.
-                    _settings.RestoreAfterHideAll = shown;
+                    // If some were already hidden by an earlier "hide all" (and one was switched on in the
+                    // app meanwhile), keep those in the memory too.
+                    var remember = (_settings.RestoreAfterHideAll ?? []).Union(shown).ToList();
+                    _settings.RestoreAfterHideAll = remember;
                     foreach (int i in shown) SetOverlayEnabled(overlays[i], false, refresh: false);
                 }
                 else
