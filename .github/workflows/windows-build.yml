@@ -9,6 +9,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -32,3 +35,19 @@ jobs:
         with:
           name: overlay-screenshots
           path: snapshots/*.png
+      - name: Publish screenshots to the ci-snapshots branch
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $sha = "${{ github.sha }}"
+          $tmp = Join-Path $env:RUNNER_TEMP "snap-branch"
+          New-Item -ItemType Directory $tmp | Out-Null
+          Copy-Item snapshots/*.png $tmp
+          Set-Location $tmp
+          git init -q -b ci-snapshots
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          "Overlay screenshots rendered from $sha" | Out-File README.md
+          git add -A
+          git commit -q -m "Screenshots for $sha"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" ci-snapshots
