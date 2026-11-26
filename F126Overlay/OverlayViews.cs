@@ -18,6 +18,9 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
 
     protected static double Now => Environment.TickCount64 / 1000.0;
 
+    /// <summary>Rounding for boxes inside the panel, following the panel's own corner radius.</summary>
+    protected double InnerRadius => Math.Clamp(_base.CornerRadius * 0.5, 0, 10);
+
     protected abstract Size ContentSize { get; }
     protected override Size MeasureOverride(Size availableSize) => ContentSize;
 
@@ -273,7 +276,7 @@ public sealed class LapLogView(TelemetryHub hub, LapLogSettings s) : OverlayView
         var ft = Text(label, 12 * fs, Theme.Brush(s.TextColor), heavy: true);
         dc.DrawText(ft, new Point(10, Math.Round(y + h / 2 - ft.Height / 2)));
         double boxX = Math.Round(w * 0.446);
-        dc.DrawRoundedRectangle(Theme.Brush("#000000", 0.3), null, new Rect(boxX, y + h * 0.17, w - boxX - 8, h * 0.66), 5, 5);
+        dc.DrawRoundedRectangle(Theme.Brush("#000000", 0.3), null, new Rect(boxX, y + h * 0.17, w - boxX - 8, h * 0.66), InnerRadius, InnerRadius);
         DrawText(dc, LapTime(ms), 21 * fs, Theme.Brush(s.TextColor), w - 14, y + h / 2, TextAlignment.Right, heavy: true);
     }
 }
@@ -345,7 +348,7 @@ public sealed class InputsView(TelemetryHub hub, InputsSettings s) : OverlayView
             if (GearW == 0) x += Pad;
             var area = new Rect(x, Pad, TraceW, h - Pad * 2);
             var frame = new Pen(Theme.Brush("#FFFFFF", 0.14), 1);
-            dc.DrawRoundedRectangle(Theme.Brush(s.TraceBackgroundColor, 0.35 * s.BackgroundOpacity + 0.1), frame, area, 4, 4);
+            dc.DrawRoundedRectangle(Theme.Brush(s.TraceBackgroundColor, 0.35 * s.BackgroundOpacity + 0.1), frame, area, InnerRadius, InnerRadius);
 
             if (s.GridLines)
             {
@@ -363,7 +366,7 @@ public sealed class InputsView(TelemetryHub hub, InputsSettings s) : OverlayView
             if (count > 1)
             {
                 double thick = Math.Clamp(s.LineThickness, 0.5, 5);
-                dc.PushClip(new RectangleGeometry(area, 4, 4));
+                dc.PushClip(new RectangleGeometry(area, InnerRadius, InnerRadius));
                 if (s.FillTrace) dc.DrawGeometry(Theme.Brush(s.ThrottleColor, 0.18), null, Trace(_thr, offset, count, want, area, closed: true));
                 dc.DrawGeometry(null, new Pen(Theme.Brush(s.ThrottleColor), thick) { LineJoin = PenLineJoin.Round }, Trace(_thr, offset, count, want, area, false));
                 if (s.FillTrace) dc.DrawGeometry(Theme.Brush(s.BrakeColor, 0.18), null, Trace(_brk, offset, count, want, area, closed: true));
@@ -390,9 +393,9 @@ public sealed class InputsView(TelemetryHub hub, InputsSettings s) : OverlayView
         double h = H;
         double top = s.ShowBarValues ? Math.Round(h * 0.28) : Pad;
         var frame = new Rect(x, top, BarW, h - top - Pad);
-        dc.DrawRoundedRectangle(Theme.Brush("#000000", 0.4), new Pen(Theme.Brush("#FFFFFF", 0.14), 1), frame, 3, 3);
+        dc.DrawRoundedRectangle(Theme.Brush("#000000", 0.4), new Pen(Theme.Brush("#FFFFFF", 0.14), 1), frame, Math.Min(InnerRadius, BarW / 2), Math.Min(InnerRadius, BarW / 2));
         double fill = frame.Height * value;
-        if (fill > 0.5) dc.DrawRoundedRectangle(Theme.Brush(hex), null, new Rect(x, frame.Bottom - fill, BarW, fill), 3, 3);
+        if (fill > 0.5) dc.DrawRoundedRectangle(Theme.Brush(hex), null, new Rect(x, frame.Bottom - fill, BarW, fill), Math.Min(InnerRadius, BarW / 2), Math.Min(InnerRadius, BarW / 2));
         if (s.ShowBarValues)
             DrawText(dc, ((int)Math.Round(value * 100)).ToString(CultureInfo.InvariantCulture), Math.Max(8, h * 0.14),
                 Theme.Brush("#FFFFFF"), x + BarW / 2, top / 2 + 1, TextAlignment.Center, heavy: true);
@@ -510,7 +513,7 @@ public sealed class TrackLimitsView(TelemetryHub hub, TrackLimitsSettings s) : O
             for (int i = 0; i < step; i++)
             {
                 var r = new Rect(12 + i * (pipW + gap), pipY - 3 * fs, pipW, 6 * fs);
-                dc.DrawRoundedRectangle(i < inBlock ? state : Theme.Brush("#FFFFFF", 0.12), null, r, 3 * fs, 3 * fs);
+                dc.DrawRoundedRectangle(i < inBlock ? state : Theme.Brush("#FFFFFF", 0.12), null, r, Math.Min(InnerRadius, r.Height / 2), Math.Min(InnerRadius, r.Height / 2));
             }
         }
         y += MainH;
@@ -545,7 +548,7 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
         (s.ShowAccentStripe ? 3 : 0) + (s.ShowTitle ? H(24) : 0) +
         (s.ShowCurrent ? H(60) : 0) + (s.ShowWheels ? H(40) : 0) +
         (s.ShowWeather ? H(30) : 0) + (s.ShowForecast ? H(44) : 0) +
-        (s.ShowOptimalNow ? H(58) : 0) + (s.ShowNextStop ? H(84) : 0) + 4;
+        (s.ShowOptimalNow ? H(58) : 0) + 4;
 
     protected override Size ContentSize => new(W, SectionsHeight);
 
@@ -603,10 +606,10 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
                 DrawText(dc, labels[i], 9 * fs, muted, x, y + h * 0.3);
                 DrawText(dc, $"{v:0}%", 12 * fs, text, x + cellW - 6, y + h * 0.3, TextAlignment.Right, heavy: true);
                 var bar = new Rect(x, y + h * 0.62, cellW - 6, 4 * fs);
-                dc.DrawRoundedRectangle(Theme.Brush("#FFFFFF", 0.1), null, bar, 2, 2);
+                dc.DrawRoundedRectangle(Theme.Brush("#FFFFFF", 0.1), null, bar, Math.Min(InnerRadius, bar.Height / 2), Math.Min(InnerRadius, bar.Height / 2));
                 double fill = bar.Width * Math.Clamp(v / 100.0, 0, 1);
                 var hex = v >= s.PitWearThreshold ? s.SoftColor : v >= s.PitWearThreshold * 0.75 ? s.MediumColor : s.InterColor;
-                if (fill > 0.5) dc.DrawRoundedRectangle(Theme.Brush(hex), null, new Rect(bar.X, bar.Y, fill, bar.Height), 2, 2);
+                if (fill > 0.5) dc.DrawRoundedRectangle(Theme.Brush(hex), null, new Rect(bar.X, bar.Y, fill, bar.Height), Math.Min(InnerRadius, bar.Height / 2), Math.Min(InnerRadius, bar.Height / 2));
             }
             y += h;
         }
@@ -637,7 +640,7 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
                     var c = TyreAdvisor.ConditionsFor(f.Weather);
                     var cHex = c == Conditions.Dry ? s.TextColor : c == Conditions.Inter ? s.InterColor : s.WetColor;
                     var cell = new Rect(12 + i * cellW + 2, y + 4, cellW - 4, h - 8);
-                    dc.DrawRoundedRectangle(Theme.Brush(cHex, c == Conditions.Dry ? 0.06 : 0.16), null, cell, 5, 5);
+                    dc.DrawRoundedRectangle(Theme.Brush(cHex, c == Conditions.Dry ? 0.06 : 0.16), null, cell, InnerRadius, InnerRadius);
                     DrawText(dc, $"+{f.TimeOffsetMin}'", 9 * fs, muted, cell.X + cell.Width / 2, cell.Y + cell.Height * 0.25, TextAlignment.Center);
                     DrawText(dc, ShortWeather(f.Weather), 10 * fs, Theme.Brush(cHex), cell.X + cell.Width / 2, cell.Y + cell.Height * 0.52, TextAlignment.Center, heavy: true);
                     DrawText(dc, $"{f.RainPercent}%", 9 * fs, muted, cell.X + cell.Width / 2, cell.Y + cell.Height * 0.8, TextAlignment.Center);
@@ -660,35 +663,6 @@ public sealed class TyreStrategyView(TelemetryHub hub, TyreStrategySettings s) :
             DrawChip(dc, 12 + 13 * fs, cy + 6 * fs, 13 * fs, a.OptimalNowVisual);
             DrawText(dc, CompoundName(a.OptimalNowVisual), 13 * fs, text, 12 + 32 * fs, cy + 6 * fs - 7 * fs, heavy: true);
             DrawText(dc, a.NowReason, 10 * fs, a.ChangeNow ? text : muted, 12 + 32 * fs, cy + 6 * fs + 8 * fs);
-            y += h;
-        }
-
-        // Next stop
-        if (s.ShowNextStop)
-        {
-            double h = H(84);
-            Divider();
-            DrawText(dc, "NEXT PIT STOP", 9 * fs, muted, 12, y + H(12), heavy: true);
-            string when = a.NextStopLap is int lapNo
-                ? (lapNo <= a.CurrentLap ? "THIS LAP" : $"Lap {lapNo}  (in {lapNo - a.CurrentLap})")
-                : a.HasData ? "No stop needed" : "–";
-            DrawText(dc, when, 12 * fs, a.NextStopLap is int ln && ln <= a.CurrentLap ? Theme.Brush(s.AlertColor) : text, w - 12, y + H(13), TextAlignment.Right, heavy: true);
-
-            double cy = y + H(42);
-            DrawChip(dc, 12 + 13 * fs, cy, 13 * fs, a.NextStopVisual);
-            DrawText(dc, CompoundName(a.NextStopVisual), 13 * fs, text, 12 + 32 * fs, cy - 7 * fs, heavy: true);
-            string detail = a.NextStopSet is TyreSet set
-                ? $"{(set.Wear == 0 ? "new set" : $"used {set.Wear}%")} · {set.UsableLife} laps life" +
-                  (set.LapDeltaMs != 0 ? $" · {set.LapDeltaMs / 1000.0:+0.0;-0.0}s" : "")
-                : a.NextStopReason;
-            DrawText(dc, detail, 10 * fs, muted, 12 + 32 * fs, cy + 8 * fs);
-
-            string footer = a.WeatherChange ?? (a.NextStopSet != null ? a.NextStopReason : "");
-            if (!string.IsNullOrEmpty(footer))
-            {
-                bool weather = a.WeatherChange != null;
-                DrawText(dc, footer, 10 * fs, weather ? Theme.Brush(s.AlertColor) : muted, 12, y + H(70), heavy: weather);
-            }
             y += h;
         }
 

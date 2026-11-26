@@ -137,9 +137,9 @@ public sealed class ControlWindow : Window
         _pages.Add((null!, BuildLapLogPage, "Lap time log", "Personal best, session best and your latest laps"));
         _pages.Add((null!, BuildInputsPage, "Inputs", "Gear, speed and a live throttle / brake trace"));
         _pages.Add((null!, BuildTrackLimitsPage, "Track limits", "Corner-cutting warnings, invalid laps and penalties"));
-        _pages.Add((null!, BuildTyresPage, "Tyre strategy", "Best tyre for wear and weather, and your next stop"));
+        _pages.Add((null!, BuildTyresPage, "Tyre strategy", "Best tyre for the weather, wear and laps left"));
         _pages.Add((null!, BuildWheelPage, "Wheel buttons", "Toggle overlays from your wheel while you drive"));
-        _pages.Add((null!, BuildThemesPage, "Themes", "One-click looks for all overlays"));
+        _pages.Add((null!, BuildThemesPage, "Themes", "One-click looks and rounded corners for all overlays"));
         _pages.Add((null!, BuildGeneralPage, "General", "Locking, lap logging, demo data and reset"));
         BuildNav();
 
@@ -413,7 +413,7 @@ public sealed class ControlWindow : Window
                     RowStacked("Row height", MakeSlider(18, 40, 1, s.RowHeight, Px, v => { s.RowHeight = v; C(); })),
                     RowStacked("Text size", MakeSlider(0.6, 1.8, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); })),
                     RowStacked("Lap rows", MakeSlider(3, 20, 1, s.Rows, v => $"{v:0}", v => { s.Rows = (int)v; C(); })),
-                    RowStacked("Corner radius", MakeSlider(0, 20, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
+                    RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
                 TransparencyCard(s, C),
                 FontCard(s, C),
                 PositionCard(w),
@@ -526,7 +526,7 @@ public sealed class ControlWindow : Window
                     RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
                     RowStacked("Width", MakeSlider(150, 360, 5, s.Width, Px, v => { s.Width = v; C(); })),
                     RowStacked("Text size", MakeSlider(0.6, 1.8, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); })),
-                    RowStacked("Corner radius", MakeSlider(0, 24, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
+                    RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
                 TransparencyCard(s, C),
                 FontCard(s, C),
                 PositionCard(w),
@@ -574,13 +574,12 @@ public sealed class ControlWindow : Window
         [
             ("Strategy", () =>
             [
-                Card("Pit stop wear", "When a tyre reaches this wear, the overlay counts it as time to box. Many drivers pit around 60-75%.",
+                Card("Tyre wear limit", "'Laps left' counts down to this wear. Many drivers pit around 60-75%.",
                     RowStacked("Box at tyre wear", MakeSlider(30, 95, 1, s.PitWearThreshold, v => $"{v:0}%", v => { s.PitWearThreshold = v; C(); }))),
                 Card("Forecast", null,
                     RowStacked("Forecast slots shown", MakeSlider(1, 8, 1, s.ForecastCount, v => $"{v:0}", v => { s.ForecastCount = (int)v; C(); }))),
                 Card("How it decides", "Optimal now: dry tyres in clear/cloudy/overcast weather, intermediates in light rain, full wets in heavy rain or storm, looking 5 minutes ahead. " +
-                    "Next stop: the earliest of your tyres reaching the wear limit (from your wear per lap this stint), a forecast weather change, or the end of the pit window. " +
-                    "For a dry stop it picks the fastest available set that lasts to the end, otherwise the longest-lasting one. It's an estimate, so trust your engineer for the final call."),
+                    "Laps left: your wear per lap this stint, counted down to the wear limit. It's an estimate, so trust your engineer for the final call."),
             ]),
             ("Layout", () =>
             [
@@ -588,7 +587,7 @@ public sealed class ControlWindow : Window
                     RowStacked("Overall size", MakeSlider(0.5, 2.0, 0.05, s.Scale, Pct, v => { s.Scale = v; C(); })),
                     RowStacked("Width", MakeSlider(230, 420, 5, s.Width, Px, v => { s.Width = v; C(); })),
                     RowStacked("Text size", MakeSlider(0.6, 1.8, 0.05, s.TextScale, Pct, v => { s.TextScale = v; C(); })),
-                    RowStacked("Corner radius", MakeSlider(0, 24, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
+                    RowStacked("Corner radius", MakeSlider(0, 30, 1, s.CornerRadius, Px, v => { s.CornerRadius = v; C(); }))),
                 TransparencyCard(s, C),
                 FontCard(s, C),
                 PositionCard(w),
@@ -603,8 +602,7 @@ public sealed class ControlWindow : Window
                     RowInline("Wear per wheel", "FL / FR / RL / RR", Switch(s.ShowWheels, on => { s.ShowWheels = on; C(); })),
                     RowInline("Weather now", null, Switch(s.ShowWeather, on => { s.ShowWeather = on; C(); })),
                     RowInline("Forecast", "Upcoming weather and rain chance", Switch(s.ShowForecast, on => { s.ShowForecast = on; C(); })),
-                    RowInline("Optimal tyre now", null, Switch(s.ShowOptimalNow, on => { s.ShowOptimalNow = on; C(); })),
-                    RowInline("Next pit stop", "Lap and tyre for your next stop", Switch(s.ShowNextStop, on => { s.ShowNextStop = on; C(); }))),
+                    RowInline("Optimal tyre now", null, Switch(s.ShowOptimalNow, on => { s.ShowOptimalNow = on; C(); }))),
             ]),
             ("Colours", () =>
             [
@@ -685,9 +683,18 @@ public sealed class ControlWindow : Window
                 _tyres.ApplyAppearance();
                 RequestSave();
                 ShowToast($"{theme.Name} applied");
+                SelectPage(_currentPage, animateTitle: false); // keep the corner slider in sync
             };
             grid.Children.Add(card);
         }
+
+        var allRadius = MakeSlider(0, 30, 1, _settings.LapLog.CornerRadius, Px, v =>
+        {
+            foreach (var o in AllOverlays) { o.Settings.CornerRadius = v; o.ApplyAppearance(); }
+            RequestSave();
+        });
+        page.Children.Add(Card("Rounded corners", "Sets the corner radius of every overlay at once, including the boxes inside them. You can still fine-tune each overlay under Layout.",
+            RowStacked("Corner radius, all overlays", allRadius)));
 
         page.Children.Add(Card("Pick a theme", "Sets colours, font and corner radius on all overlays. You can still fine-tune everything afterwards.", grid));
         return page;

@@ -132,7 +132,6 @@ public sealed class TyreStrategySettings : OverlaySettings
     public bool ShowWeather { get; set; } = true;
     public bool ShowForecast { get; set; } = true;
     public bool ShowOptimalNow { get; set; } = true;
-    public bool ShowNextStop { get; set; } = true;
 
     // Colours
     public string AccentColor { get; set; } = "#E10600";
