@@ -131,7 +131,8 @@ public abstract class OverlayView(TelemetryHub hub, OverlaySettings settings) : 
             _ => x,
         };
         var origin = new Point(Math.Round(left), Math.Round(yCenter - ft.Height / 2));
-        if (_base.TextOutline)
+        // Faint text (placeholders, hints) stays without an outline; it would only add noise.
+        if (_base.TextOutline && !(brush is SolidColorBrush sb && sb.Color.A < 128))
         {
             // Outline: stroke the glyph shapes, then draw the text on top so only the outside edge shows.
             double ow = Math.Clamp(_base.TextOutlineWidth, 0.5, 5);
